@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 nohup python ./src/train.py ./data/BGL/BGL_parsed_result_03.csv  --lr 0.1 --model deeplog --n_epoch 100 --optimizer sgd --partition_method timestamp --pretrain_path ./data/wiki-news-300d-1M.vec --top_k 40 --train_ratio 0.01 --session_size 200 >> log/deeplog/bgl_nofilter_sgd_200_40.log 2>&1 &
