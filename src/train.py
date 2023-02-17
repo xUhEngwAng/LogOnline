@@ -46,6 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--optimizer', default='sgd', type=str)
     parser.add_argument('--partition_method', default='session', type=str)
     parser.add_argument('--reset_enabled', action='store_true')
+    parser.add_argument('--shuffle', action='store_true')
     parser.add_argument('--top_k', default=9, type=int)
     parser.add_argument('--train_ratio', default=0.01, type=float)
     
@@ -78,7 +79,8 @@ if __name__ == '__main__':
                                                          args.partition_method, 
                                                          args.train_ratio, 
                                                          args.filter_abnormal,
-                                                         args.session_size)
+                                                         args.session_size,
+                                                         args.shuffle)
     
     # Obtain unique templates of the training data
     eventid_templates = {}
