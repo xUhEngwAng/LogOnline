@@ -34,16 +34,16 @@ if __name__ == '__main__':
     parser.add_argument('--input_size', default=64, type=int)
     parser.add_argument('--hidden_size', default=64, type=int)
     parser.add_argument('--num_layers', default=2, type=int)
-    parser.add_argument('--pretrain_path', default=None, type=str, help='path of pretrained word embeddings')
+    parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
     parser.add_argument('--session_size', default=100, type=int)
     parser.add_argument('--step_size', default=1, type=int)
     parser.add_argument('--window_size', default=10, type=int)
     
     parser.add_argument('--filter_abnormal', action='store_true')
-    parser.add_argument('--lr', default=0.001, type=float)
+    parser.add_argument('--lr', default=0.1, type=float)
     parser.add_argument('--model', default='deeplog', type=str)
     parser.add_argument('--n_epoch', default=300, type=int)
-    parser.add_argument('--optimizer', default='adam', type=str)
+    parser.add_argument('--optimizer', default='sgd', type=str)
     parser.add_argument('--partition_method', default='session', type=str)
     parser.add_argument('--reset_enabled', action='store_true')
     parser.add_argument('--top_k', default=9, type=int)
@@ -66,8 +66,11 @@ if __name__ == '__main__':
     parsed_log_df.fillna({'Templates': ''}, inplace=True)
     logger.info(f'Loading structured log file from {args.path}, {len(parsed_log_df)} log messages loaded.')
         
-    if args.model == 'loganomaly' and args.pretrain_path is not None:
+    if args.model != 'deeplog' and args.pretrain_path is not None:
+        if args.model == 'unilog':
+            args.hidden_size = 300
         args.input_size = 300
+            
         embedding_matrix = buildVocab(parsed_log_df, args.pretrain_path)
                 
     # Dataset Preparation
@@ -135,7 +138,9 @@ if __name__ == '__main__':
                        args.input_size,
                        args.hidden_size,
                        args.reset_enabled,
-                       args.top_k).to(device)
+                       args.top_k,
+                       embedding_matrix,
+                       training_uniq_templates).to(device)
     else:
         logger.error(f'Unrecognised model {args.model}, exiting...')
         exit(0)
