@@ -85,6 +85,50 @@ class SemanticsEmbedding(torch.nn.Module):
         super(SemanticsEmbedding, self).__init__()
         self.word_embedder = torch.nn.Embedding.from_pretrained(pretrain_matrix, freeze=True).cuda()
         self.num_classes = num_classes
+        
+        # Reserve a zero embedding for template padding
+        training_tokens_id.append([])
+        template_embeddings = torch.vstack([self.templateEmbedding(tokens_id) for tokens_id in training_tokens_id])
+        self.template_embedder = torch.nn.Embedding.from_pretrained(template_embeddings, freeze=True)
+        
+    def templateEmbedding(self, tokens_id):
+        '''
+        Calculate template embedding by aggregating its tokens' embedding
+        '''
+        tokens_embedding = self.word_embedder(torch.tensor(tokens_id, dtype=torch.int).cuda())
+        if len(tokens_id) == 0:
+            return torch.sum(tokens_embedding, axis=0)
+        return torch.mean(tokens_embedding, axis=0)
+    
+    def forward(self, input_dict):
+        batch_event_ids = input_dict['eventids']
+        batch_tokens_id = input_dict['templates']
+        new_tokens_id = []
+        
+        for batch_ind, event_ids in enumerate(batch_event_ids):
+            for ind, event_id in enumerate(event_ids):
+                if self.num_classes < event_id:
+                    new_tokens_id.append(batch_tokens_id[batch_ind][ind])
+                    self.num_classes += 1
+                    
+        for batch_ind, next_event in enumerate(input_dict['next']):
+            if self.num_classes < next_event['eventid']:
+                new_tokens_id.append(next_event['template'])
+                self.num_classes += 1
+        
+        if 0 < len(new_tokens_id):
+            new_template_embeddings = torch.stack([self.templateEmbedding(tokens_id) for tokens_id in new_tokens_id])
+            # Concat new_embeddings to self.template_embedder
+            embedding_matrix = torch.concat([self.template_embedder.weight.data, new_template_embeddings.cuda()], axis=0)
+            self.template_embedder = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=True)
+            
+        return self.template_embedder(torch.tensor(batch_event_ids).cuda())
+    
+class SemanticsNNEmbedding(torch.nn.Module):
+    def __init__(self, num_classes, pretrain_matrix, training_tokens_id):
+        super(SemanticsNNEmbedding, self).__init__()
+        self.word_embedder = torch.nn.Embedding.from_pretrained(pretrain_matrix, freeze=True).cuda()
+        self.num_classes = num_classes
         self.cos_similarity = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
         self.nearest_template = {}
         

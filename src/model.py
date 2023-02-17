@@ -4,6 +4,7 @@ from base_model import BaseModel
 from embedding import ContextEmbedding
 from embedding import OneHotEmbedding
 from embedding import SemanticsEmbedding
+from embedding import SemanticsNNEmbedding
     
 class DeepLog(BaseModel):
     def __init__(self, 
@@ -33,7 +34,7 @@ class LogAnomaly(BaseModel):
                  training_tokens_id):
         super(LogAnomaly, self).__init__(top_k)
         self.num_classes = num_classes
-        self.EmbeddingLayer = SemanticsEmbedding(num_classes, pretrain_matrix, training_tokens_id)
+        self.EmbeddingLayer = SemanticsNNEmbedding(num_classes, pretrain_matrix, training_tokens_id)
         self.FC = torch.nn.Linear(hidden_size, num_classes)
         self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         
@@ -49,11 +50,13 @@ class UniLog(BaseModel):
                  input_size, 
                  hidden_size,
                  reset_enabled,
-                 top_k):
+                 top_k,
+                 pretrain_matrix, 
+                 training_tokens_id):
         super(UniLog, self).__init__(top_k)
-        self.EmbeddingLayer = ContextEmbedding(num_classes, input_size)
+        self.EmbeddingLayer = SemanticsEmbedding(num_classes, pretrain_matrix, training_tokens_id)
         self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.candidates = {'templates': [[]], 'eventids': [[]]}
+        self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
         self.key2label = {}
         self.reset_enabled = reset_enabled
         
@@ -71,22 +74,23 @@ class UniLog(BaseModel):
             self.updateCandidates(next_log['eventid'], next_log['template'])
             input_dict['next'][batch_ind]['eventid'] = self.key2label[next_log['eventid']]
         
-        self.EmbeddingLayer.updateEmbeddingSize(len(self.key2label))
+        # self.EmbeddingLayer.updateEmbeddingSize(len(self.key2label))
         candidates_embedding = self.EmbeddingLayer(self.candidates)[-1]
         context_embedding = self.EmbeddingLayer(input_dict)
         
         output, (hn, cn) = self.LSTMLayer(context_embedding)
         pred = torch.mm(hn[-1], candidates_embedding.t())
-            
         return pred
     
     def resetCandidates(self):
-        self.candidates = {'templates': [[]], 'eventids': [[]]}
+        self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
         self.key2label.clear()
         
+    '''
     def set_optimizer(self, optim):
         self.EmbeddingLayer.setOptimizer(optim)
         self.optim = optim
+    '''
         
     def updateCandidates(self, event_id, template):
         if event_id not in self.key2label:
