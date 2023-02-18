@@ -1,6 +1,7 @@
 import torch
 
 from base_model import BaseModel
+from embedding import CombinedEmbedding
 from embedding import ContextEmbedding
 from embedding import OneHotEmbedding
 from embedding import SemanticsEmbedding
@@ -54,7 +55,7 @@ class UniLog(BaseModel):
                  pretrain_matrix, 
                  training_tokens_id):
         super(UniLog, self).__init__(top_k)
-        self.EmbeddingLayer = SemanticsEmbedding(num_classes, pretrain_matrix, training_tokens_id)
+        self.EmbeddingLayer = CombinedEmbedding(num_classes, hidden_size, pretrain_matrix, training_tokens_id)
         self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
         self.key2label = {}
@@ -74,7 +75,7 @@ class UniLog(BaseModel):
             self.updateCandidates(next_log['eventid'], next_log['template'])
             input_dict['next'][batch_ind]['eventid'] = self.key2label[next_log['eventid']]
         
-        # self.EmbeddingLayer.updateEmbeddingSize(len(self.key2label))
+        self.EmbeddingLayer.updateEmbeddingSize(len(self.key2label))
         candidates_embedding = self.EmbeddingLayer(self.candidates)[-1]
         context_embedding = self.EmbeddingLayer(input_dict)
         
@@ -86,11 +87,9 @@ class UniLog(BaseModel):
         self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
         self.key2label.clear()
         
-    '''
     def set_optimizer(self, optim):
         self.EmbeddingLayer.setOptimizer(optim)
         self.optim = optim
-    '''
         
     def updateCandidates(self, event_id, template):
         if event_id not in self.key2label:

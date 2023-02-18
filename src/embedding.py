@@ -37,7 +37,7 @@ class ContextEmbedding(torch.nn.Module):
         torch.nn.init.normal_(new_embeddings)
         
         # Concat new_embeddings to self.embedding_layer
-        embedding_matrix = torch.concat([self.embedding_layer.weight.data, new_embeddings.cuda()], axis=0)
+        embedding_matrix = torch.concat((self.embedding_layer.weight.data, new_embeddings.cuda()), axis=0)
         self.embedding_layer = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=False)
         self.optim.param_groups[0]['params'].append(self.embedding_layer.weight.data)
         
@@ -119,7 +119,7 @@ class SemanticsEmbedding(torch.nn.Module):
         if 0 < len(new_tokens_id):
             new_template_embeddings = torch.stack([self.templateEmbedding(tokens_id) for tokens_id in new_tokens_id])
             # Concat new_embeddings to self.template_embedder
-            embedding_matrix = torch.concat([self.template_embedder.weight.data, new_template_embeddings.cuda()], axis=0)
+            embedding_matrix = torch.concat((self.template_embedder.weight.data, new_template_embeddings.cuda()), axis=0)
             self.template_embedder = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=True)
             
         return self.template_embedder(torch.tensor(batch_event_ids).cuda())
@@ -177,10 +177,27 @@ class SemanticsNNEmbedding(torch.nn.Module):
         return self.template_embedder(torch.tensor(batch_event_ids).cuda())
     
 class CombinedEmbedding(torch.nn.Module):
-    def __init__(self, pretrain_path, freeze=False):
+    def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
         super(CombinedEmbedding, self).__init__()
-        self.embedding_lookup_table = torch.nn.Embedding.from_pretrained(pretrain_path, freeze=freeze)
+        self.context_embedder = ContextEmbedding(num_classes, n_dim)  
+        self.semantics_embedder = torch.nn.Sequential(
+            SemanticsEmbedding(num_classes, pretrain_matrix, training_tokens_id),
+            torch.nn.Linear(300, n_dim),
+            torch.nn.ReLU()
+        )
+        self.fc = torch.nn.Linear(n_dim+n_dim, 1)
     
     def forward(self, input_dict):
-        pass
+        context_embedding = self.context_embedder(input_dict)
+        semantics_embedding = self.semantics_embedder(input_dict)
+        concat_embedding = torch.concat((context_embedding, semantics_embedding), axis=2)
+        alpha = torch.sigmoid(self.fc(concat_embedding))
+        return alpha*context_embedding + (1-alpha)*semantics_embedding
+    
+    def setOptimizer(self, optim):
+        self.context_embedder.setOptimizer(optim)
+        
+    def updateEmbeddingSize(self, event_cnt):
+        self.context_embedder.updateEmbeddingSize(event_cnt)
+        
         
