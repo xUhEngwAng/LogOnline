@@ -27,24 +27,27 @@ def collate_fn(batch_input_dict):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    
     parser.add_argument('path', type=str, help='path of structured log file')
+    
+    # size-related arguments
     parser.add_argument('--batch_size', default=1024, type=int)
     parser.add_argument('--eval_batch_size', default=None, type=int)
     parser.add_argument('--input_size', default=64, type=int)
     parser.add_argument('--hidden_size', default=64, type=int)
     parser.add_argument('--num_layers', default=2, type=int)
-    parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
     parser.add_argument('--session_size', default=100, type=int)
     parser.add_argument('--step_size', default=1, type=int)
     parser.add_argument('--window_size', default=10, type=int)
     
+    # other general arguments
+    parser.add_argument('--embedding_method', default='context', type=str, help='the chosen embedding layer of UniLog model')
     parser.add_argument('--filter_abnormal', action='store_true')
     parser.add_argument('--lr', default=0.1, type=float)
     parser.add_argument('--model', default='deeplog', type=str)
     parser.add_argument('--n_epoch', default=300, type=int)
     parser.add_argument('--optimizer', default='sgd', type=str)
     parser.add_argument('--partition_method', default='session', type=str)
+    parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
     parser.add_argument('--reset_enabled', action='store_true')
     parser.add_argument('--shuffle', action='store_true')
     parser.add_argument('--top_k', default=9, type=int)
@@ -52,11 +55,6 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    # Load Pretrained word embeddings
-    if args.model == 'loganomaly' and args.pretrain_path is None:
-        logger.error(f'Fatal error. pretrain_path must be specified when running {args.model}.')
-        exit(0)
-        
     if args.eval_batch_size is None:
         args.eval_batch_size = args.batch_size
         
@@ -66,13 +64,21 @@ if __name__ == '__main__':
     parsed_log_df = pd.read_csv(args.path)
     parsed_log_df.fillna({'Templates': ''}, inplace=True)
     logger.info(f'Loading structured log file from {args.path}, {len(parsed_log_df)} log messages loaded.')
-        
-    if args.model != 'deeplog' and args.pretrain_path is not None:
-        if args.model == 'unilog':
-            args.hidden_size = 300
-        args.input_size = 300
-            
-        embedding_matrix = buildVocab(parsed_log_df, args.pretrain_path)
+    
+    # Load Pretrained word embeddings
+    embedding_matrix = None
+    if args.model == 'loganomaly':
+        if args.pretrain_path is None:
+            logger.error(f'Fatal error, pretrain_path must be specified when running {args.model}.')
+            exit(0)
+        else:
+            embedding_matrix = buildVocab(parsed_log_df, args.pretrain_path)
+    if args.model == 'unilog' and args.embedding_method != 'context':
+        if args.pretrain_path is None:
+            logger.error(f'Fatal error, pretrain_path must be specified when running {args.model} with {args.embedding_method} embedding.')
+            exit(0)
+        else:
+            embedding_matrix = buildVocab(parsed_log_df, args.pretrain_path)
                 
     # Dataset Preparation
     session_train, session_test, num_classes = partition(parsed_log_df, 
@@ -120,36 +126,42 @@ if __name__ == '__main__':
                                  pin_memory=False)
     
     if args.model == 'deeplog':
+        logger.info(f'Initializing DeepLog model.')
         model = DeepLog(num_classes,
                         args.num_layers, 
-                        args.input_size, 
                         args.hidden_size, 
                         args.top_k).to(device)
         
     elif args.model == 'loganomaly':
+        logger.info(f'Initializing LogAnomaly model.')
         model = LogAnomaly(num_classes,
                            args.num_layers, 
-                           args.input_size, 
                            args.hidden_size, 
                            args.top_k,
                            embedding_matrix,
                            training_uniq_templates).to(device)
+        
     elif args.model == 'unilog':
+        logger.info(f'Initializing UniLog model, embedding_method: {args.embedding_method}.')
         model = UniLog(num_classes,
                        args.num_layers,
                        args.input_size,
                        args.hidden_size,
-                       args.reset_enabled,
                        args.top_k,
+                       args.reset_enabled,
+                       args.embedding_method,
                        embedding_matrix,
                        training_uniq_templates).to(device)
     else:
-        logger.error(f'Unrecognised model {args.model}, exiting...')
+        logger.error(f'Fatal error, unrecognised model {args.model}.')
         exit(0)
+        
+    logger.info(f'num_classes: {num_classes}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.top_k}, optimizer: {args.optimizer}, lr: {args.lr}.')
 
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    model.set_optimizer(optimizer)
+        
+    model.setOptimizer(optimizer)
     model.fit_evaluate(dataloader_train, dataloader_test, args.n_epoch)

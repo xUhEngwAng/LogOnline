@@ -1,3 +1,4 @@
+import logging
 import torch
 
 from base_model import BaseModel
@@ -6,12 +7,14 @@ from embedding import ContextEmbedding
 from embedding import OneHotEmbedding
 from embedding import SemanticsEmbedding
 from embedding import SemanticsNNEmbedding
-    
+
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 class DeepLog(BaseModel):
     def __init__(self, 
                  num_classes, 
                  num_layers, 
-                 input_size, 
                  hidden_size, 
                  top_k):
         super(DeepLog, self).__init__(top_k)
@@ -28,7 +31,6 @@ class LogAnomaly(BaseModel):
     def __init__(self, 
                  num_classes,
                  num_layers,
-                 input_size, 
                  hidden_size,
                  top_k,
                  pretrain_matrix, 
@@ -37,7 +39,7 @@ class LogAnomaly(BaseModel):
         self.num_classes = num_classes
         self.EmbeddingLayer = SemanticsNNEmbedding(num_classes, pretrain_matrix, training_tokens_id)
         self.FC = torch.nn.Linear(hidden_size, num_classes)
-        self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.LSTMLayer = torch.nn.LSTM(300, hidden_size, num_layers, batch_first=True)
         
     def forward(self, input_dict):
         context_embedding = self.EmbeddingLayer(input_dict)
@@ -50,12 +52,24 @@ class UniLog(BaseModel):
                  num_layers,
                  input_size, 
                  hidden_size,
-                 reset_enabled,
                  top_k,
+                 reset_enabled,
+                 embedding_method,
                  pretrain_matrix, 
                  training_tokens_id):
         super(UniLog, self).__init__(top_k)
-        self.EmbeddingLayer = CombinedEmbedding(num_classes, hidden_size, pretrain_matrix, training_tokens_id)
+        
+        if embedding_method == 'context':
+            self.EmbeddingLayer = ContextEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
+        elif embedding_method == 'semantics':
+            input_size = 300
+            self.EmbeddingLayer = SemanticsEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
+        elif embedding_method == 'combined':
+            self.EmbeddingLayer = CombinedEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
+        else:
+            logger.error(f'Fatal error, unrecognised embedding method {embedding_method} for UniLog model.')
+            exit(0)
+            
         self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
         self.key2label = {}
@@ -87,7 +101,7 @@ class UniLog(BaseModel):
         self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
         self.key2label.clear()
         
-    def set_optimizer(self, optim):
+    def setOptimizer(self, optim):
         self.EmbeddingLayer.setOptimizer(optim)
         self.optim = optim
         
