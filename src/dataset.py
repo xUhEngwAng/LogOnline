@@ -1,5 +1,4 @@
 import logging
-import torch
 from bisect import bisect_right
 from torch.utils.data import Dataset
 

@@ -2,7 +2,8 @@ import re
 import torch
 
 class ContextEmbedding(torch.nn.Module):
-    def __init__(self, num_classes, n_dim):
+    def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
+        
         '''
         Attributes
         ----------
@@ -81,7 +82,7 @@ class OneHotEmbedding(torch.nn.Module):
         return self.embedding_layer(batch_event_ids.cuda())
     
 class SemanticsEmbedding(torch.nn.Module):
-    def __init__(self, num_classes, pretrain_matrix, training_tokens_id):
+    def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
         super(SemanticsEmbedding, self).__init__()
         self.word_embedder = torch.nn.Embedding.from_pretrained(pretrain_matrix, freeze=True).cuda()
         self.num_classes = num_classes
@@ -123,6 +124,12 @@ class SemanticsEmbedding(torch.nn.Module):
             self.template_embedder = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=True)
             
         return self.template_embedder(torch.tensor(batch_event_ids).cuda())
+    
+    def setOptimizer(self, optim):
+        pass
+        
+    def updateEmbeddingSize(self, event_cnt):
+        pass
     
 class SemanticsNNEmbedding(torch.nn.Module):
     def __init__(self, num_classes, pretrain_matrix, training_tokens_id):
