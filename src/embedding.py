@@ -1,5 +1,9 @@
+import logging
 import re
 import torch
+
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 class ContextEmbedding(torch.nn.Module):
     def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
@@ -20,27 +24,18 @@ class ContextEmbedding(torch.nn.Module):
         
         @params optim: the global optimizer used to train the model. EmbeddingLayer dynamically
                        add embeddings during training, which should be registered in `optim` to
-                       ensure they are normally updated in back propagation
+                       ensure they are normally updated in back propagation.
         '''
         self.optim = optim
         
-    def updateEmbeddingSize(self, event_cnt):
-        curr_embedding_size = self.embedding_layer.weight.shape[0]
-        if event_cnt <= curr_embedding_size:
-            return
-        
-        trgt_embedding_size = curr_embedding_size
-        
-        while trgt_embedding_size < event_cnt:
-            trgt_embedding_size += trgt_embedding_size
-            
-        new_embeddings = torch.empty(trgt_embedding_size-curr_embedding_size, self.n_dim)
+    def updateEmbeddingSize(self, new_tokens_id):
+        new_embeddings = torch.empty(len(new_tokens_id), self.n_dim)
         torch.nn.init.normal_(new_embeddings)
-        
+
         # Concat new_embeddings to self.embedding_layer
         embedding_matrix = torch.concat((self.embedding_layer.weight.data, new_embeddings.cuda()), axis=0)
         self.embedding_layer = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=False)
-        self.optim.param_groups[0]['params'].append(self.embedding_layer.weight.data)
+        self.optim.param_groups[0]['params'].append(self.embedding_layer.weight)
         
     def forward(self, input_dict):
         batch_event_ids = torch.tensor(input_dict['eventids']).cuda()
@@ -85,7 +80,7 @@ class SemanticsEmbedding(torch.nn.Module):
     def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
         super(SemanticsEmbedding, self).__init__()
         self.word_embedder = torch.nn.Embedding.from_pretrained(pretrain_matrix, freeze=True).cuda()
-        self.num_classes = num_classes
+        assert(num_classes == len(training_tokens_id))
         
         # Reserve a zero embedding for template padding
         training_tokens_id.append([])
@@ -102,34 +97,17 @@ class SemanticsEmbedding(torch.nn.Module):
         return torch.mean(tokens_embedding, axis=0)
     
     def forward(self, input_dict):
-        batch_event_ids = input_dict['eventids']
-        batch_tokens_id = input_dict['templates']
-        new_tokens_id = []
-        
-        for batch_ind, event_ids in enumerate(batch_event_ids):
-            for ind, event_id in enumerate(event_ids):
-                if self.num_classes < event_id:
-                    new_tokens_id.append(batch_tokens_id[batch_ind][ind])
-                    self.num_classes += 1
-                    
-        for batch_ind, next_event in enumerate(input_dict['next']):
-            if self.num_classes < next_event['eventid']:
-                new_tokens_id.append(next_event['template'])
-                self.num_classes += 1
-        
-        if 0 < len(new_tokens_id):
-            new_template_embeddings = torch.stack([self.templateEmbedding(tokens_id) for tokens_id in new_tokens_id])
-            # Concat new_embeddings to self.template_embedder
-            embedding_matrix = torch.concat((self.template_embedder.weight.data, new_template_embeddings.cuda()), axis=0)
-            self.template_embedder = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=True)
-            
-        return self.template_embedder(torch.tensor(batch_event_ids).cuda())
+        batch_event_ids = torch.tensor(input_dict['eventids']).cuda()
+        return self.template_embedder(batch_event_ids)
     
     def setOptimizer(self, optim):
         pass
         
-    def updateEmbeddingSize(self, event_cnt):
-        pass
+    def updateEmbeddingSize(self, new_tokens_id):
+        new_template_embeddings = torch.stack([self.templateEmbedding(tokens_id) for tokens_id in new_tokens_id])
+        # Concat new_embeddings to self.template_embedder
+        embedding_matrix = torch.concat((self.template_embedder.weight.data, new_template_embeddings.cuda()), axis=0)
+        self.template_embedder = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=True)
     
 class SemanticsNNEmbedding(torch.nn.Module):
     def __init__(self, num_classes, pretrain_matrix, training_tokens_id):
@@ -186,9 +164,9 @@ class SemanticsNNEmbedding(torch.nn.Module):
 class CombinedEmbedding(torch.nn.Module):
     def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
         super(CombinedEmbedding, self).__init__()
-        self.context_embedder = ContextEmbedding(num_classes, n_dim)  
+        self.context_embedder = ContextEmbedding(num_classes, n_dim, pretrain_matrix, training_tokens_id)  
         self.semantics_embedder = torch.nn.Sequential(
-            SemanticsEmbedding(num_classes, pretrain_matrix, training_tokens_id),
+            SemanticsEmbedding(num_classes, n_dim, pretrain_matrix, training_tokens_id),
             torch.nn.Linear(300, n_dim),
             torch.nn.ReLU()
         )
@@ -204,7 +182,8 @@ class CombinedEmbedding(torch.nn.Module):
     def setOptimizer(self, optim):
         self.context_embedder.setOptimizer(optim)
         
-    def updateEmbeddingSize(self, event_cnt):
-        self.context_embedder.updateEmbeddingSize(event_cnt)
+    def updateEmbeddingSize(self, new_tokens_id):
+        self.context_embedder.updateEmbeddingSize(new_tokens_id)
+        self.semantics_embedder[0].updateEmbeddingSize(new_tokens_id)
         
         
