@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 class BaseModel(torch.nn.Module):
     def __init__(self, top_k):
         super(BaseModel, self).__init__()
+        self.optim = None
         self.top_k = top_k
     
     def evaluate(self, test_loader):
@@ -18,47 +19,62 @@ class BaseModel(torch.nn.Module):
         for batch in test_loader:
             pred = model.forward(batch)
             _, batch_topk_pred = torch.topk(pred, self.top_k)
-            batch_topk_pred = batch_topk_pred.tolist()
+            
+            batch_topk_pred_lst = batch_topk_pred.tolist()
             batch_next_log = [next_log['eventid'] for next_log in batch['next']]
-            matched = [next_log in topk_pred for next_log, topk_pred in zip(batch_next_log, batch_topk_pred)]
-                
+            matched = []
+            
+            for top_k in range(self.top_k):
+                curr_matched = [batch_topk_pred_lst[ind][top_k] == batch_next_log[ind] for ind in range(len(batch_next_log))]
+                if 0 < len(matched):
+                    prev_matched = matched[-1]
+                    curr_matched = [prev|curr for prev, curr in zip(prev_matched, curr_matched)]
+                matched.append(curr_matched)
+                            
             for ind in range(len(batch['session_key'])):
                 session_key = batch['session_key'][ind]
                 label = batch['anomaly'][ind]
                 if session_key not in session_dict:
-                    session_dict[session_key] = {'anomaly': False, 'matched': True}
+                    session_dict[session_key] = {f'matched_{top_k}': True for top_k in range(self.top_k)}
+                    session_dict[session_key]['anomaly'] = False
                 session_dict[session_key]['anomaly'] |= label
-                session_dict[session_key]['matched'] &= matched[ind]
+                
+                for top_k in range(self.top_k):
+                    session_dict[session_key][f'matched_{top_k}'] &= matched[top_k][ind]
         
-        TP = 0
-        FP = 0
+        TP = [0] * self.top_k
+        FP = [0] * self.top_k
         TON = 0 # total negative
         TOP = 0 # total positive
         
         for key, session_info in session_dict.items():
             if session_info['anomaly']:
                 TOP += 1
-                if not session_info['matched']:
-                    TP += 1
+                for top_k in range(self.top_k):
+                    if not session_info[f'matched_{top_k}']:
+                        TP[top_k] += 1
             else:
                 TON += 1
-                if not session_info['matched']:
-                    FP += 1
+                for top_k in range(self.top_k):
+                    if not session_info[f'matched_{top_k}']:
+                        FP[top_k] += 1
                     
-        FN = TOP - TP
+        logger.info(f'Evaluation finished. TOP: {TOP}, TON: {TON}.')
+        FN = [TOP - TP[top_k] for top_k in range(self.top_k)]
         
-        if TP + FP == 0:
-            precision = np.NAN
-        else:
-            precision = TP / (TP + FP)
-        
-        if TOP == 0:
-            recall = np.NAN
-        else:
-            recall = TP / TOP
-            
-        F1 = 2 * precision * recall / (precision + recall)
-        logger.info(f'Evaluation finished. TOP: {TOP}, TON: {TON}, FP: {FP}, FN: {FN}, Precision: {precision: .3f}, Recall: {recall :.3f}, F1-measure: {F1: .3f}.')
+        for top_k in range(self.top_k):
+            if TP[top_k] + FN[top_k] == 0:
+                precision = np.NAN
+            else:
+                precision = TP[top_k] / (TP[top_k] + FP[top_k])
+
+            if TOP == 0:
+                recall = np.NAN
+            else:
+                recall = TP[top_k] / TOP
+
+            F1 = 2 * precision * recall / (precision + recall)
+            logger.info(f'[topk={top_k+1}] FP: {FP[top_k]}, FN: {FN[top_k]}, Precision: {precision: .3f}, Recall: {recall :.3f}, F1-measure: {F1: .3f}.')
     
     def fit(self, train_loader):
         batch_cnt = 0
@@ -90,6 +106,6 @@ class BaseModel(torch.nn.Module):
             self.evaluate(test_loader)
             logger.info(f'[{epoch+1}|{n_epoch}] fit_evaluate finished, time elapsed: {time.time()-start: .3f}s. ')
             
-    def set_optimizer(self, optim):
+    def setOptimizer(self, optim):
         self.optim = optim
             
