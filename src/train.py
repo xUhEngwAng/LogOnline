@@ -48,10 +48,9 @@ if __name__ == '__main__':
     parser.add_argument('--optimizer', default='sgd', type=str)
     parser.add_argument('--partition_method', default='session', type=str)
     parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
-    parser.add_argument('--reset_enabled', action='store_true')
     parser.add_argument('--shuffle', action='store_true')
     parser.add_argument('--top_k', default=9, type=int)
-    parser.add_argument('--train_ratio', default=0.01, type=float)
+    parser.add_argument('--train_ratio', default=0.8, type=float)
     
     args = parser.parse_args()
     
@@ -136,6 +135,7 @@ if __name__ == '__main__':
         logger.info(f'Initializing LogAnomaly model.')
         model = LogAnomaly(num_classes,
                            args.num_layers, 
+                           args.input_size,
                            args.hidden_size, 
                            args.top_k,
                            embedding_matrix,
@@ -148,7 +148,6 @@ if __name__ == '__main__':
                        args.input_size,
                        args.hidden_size,
                        args.top_k,
-                       args.reset_enabled,
                        args.embedding_method,
                        embedding_matrix,
                        training_uniq_templates).to(device)
@@ -156,7 +155,7 @@ if __name__ == '__main__':
         logger.error(f'Fatal error, unrecognised model {args.model}.')
         exit(0)
         
-    logger.info(f'num_classes: {num_classes}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.top_k}, optimizer: {args.optimizer}, lr: {args.lr}.')
+    logger.info(f'num_classes: {num_classes}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.top_k}, optimizer: {args.optimizer}, lr: {args.lr}, train_ratio: {args.train_ratio}, window_size: {args.window_size}.')
 
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
