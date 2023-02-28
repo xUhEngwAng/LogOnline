@@ -45,6 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', default=0.1, type=float)
     parser.add_argument('--model', default='deeplog', type=str)
     parser.add_argument('--n_epoch', default=300, type=int)
+    parser.add_argument('--online_mode', action='store_true')
     parser.add_argument('--optimizer', default='sgd', type=str)
     parser.add_argument('--partition_method', default='session', type=str)
     parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
@@ -129,7 +130,8 @@ if __name__ == '__main__':
         model = DeepLog(num_classes,
                         args.num_layers, 
                         args.hidden_size, 
-                        args.top_k).to(device)
+                        args.top_k,
+                        args.online_mode).to(device)
         
     elif args.model == 'loganomaly':
         logger.info(f'Initializing LogAnomaly model.')
@@ -138,6 +140,7 @@ if __name__ == '__main__':
                            args.input_size,
                            args.hidden_size, 
                            args.top_k,
+                           args.online_mode,
                            embedding_matrix,
                            training_uniq_templates).to(device)
         
@@ -148,6 +151,7 @@ if __name__ == '__main__':
                        args.input_size,
                        args.hidden_size,
                        args.top_k,
+                       args.online_mode,
                        args.embedding_method,
                        embedding_matrix,
                        training_uniq_templates).to(device)

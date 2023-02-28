@@ -7,19 +7,38 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 logger = logging.getLogger(__name__)
 
 class BaseModel(torch.nn.Module):
-    def __init__(self, top_k):
+    def __init__(self, top_k, online_mode=False):
         super(BaseModel, self).__init__()
+        self.loss = torch.nn.CrossEntropyLoss()
         self.optim = None
         self.top_k = top_k
+        self.online_mode = online_mode
     
     def evaluate(self, test_loader):
-        model = self.eval()
+        if self.online_mode:
+            logger.info('Online mode enabled, model would get updated during evaluation.')
+            model = self.train()
+        else:
+            model = self.eval()
+            
         session_dict = {}
         
         for batch in test_loader:
             pred = model.forward(batch)
-            _, batch_topk_pred = torch.topk(pred, self.top_k)
             
+            # back-propagation in online mode
+            if self.online_mode:
+                label = torch.tensor([next_log['eventid'] for next_log in batch['next']]).to('cuda')
+                batch_loss = self.loss(pred, label)
+                print(f'pred.shape() = {pred.shape}')
+                print(f'label.min() = {label.min()}, label.max() = {label.max()}')
+                
+                self.optim.zero_grad()
+                batch_loss.backward()
+                #total_loss += batch_loss
+                self.optim.step()
+            
+            _, batch_topk_pred = torch.topk(pred, self.top_k)     
             batch_topk_pred_lst = batch_topk_pred.tolist()
             batch_next_log = [next_log['eventid'] for next_log in batch['next']]
             matched = []
@@ -80,7 +99,6 @@ class BaseModel(torch.nn.Module):
         batch_cnt = 0
         total_loss = 0
         model = self.train()
-        loss = torch.nn.CrossEntropyLoss()
         start = time.time()
         
         for batch in train_loader:
@@ -89,7 +107,7 @@ class BaseModel(torch.nn.Module):
             pred = model.forward(batch)
             label = torch.tensor([next_log['eventid'] for next_log in batch['next']]).to('cuda')
             
-            batch_loss = loss(pred, label)
+            batch_loss = self.loss(pred, label)
             batch_loss.backward()
             total_loss += batch_loss
             self.optim.step()

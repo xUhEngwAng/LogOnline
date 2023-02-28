@@ -16,8 +16,9 @@ class DeepLog(BaseModel):
                  num_classes, 
                  num_layers, 
                  hidden_size, 
-                 top_k):
-        super(DeepLog, self).__init__(top_k)
+                 top_k,
+                 online_mode):
+        super(DeepLog, self).__init__(top_k, online_mode)
         self.EmbeddingLayer = OneHotEmbedding(num_classes+1)
         self.FC = torch.nn.Linear(hidden_size, num_classes)
         self.LSTMLayer = torch.nn.LSTM(num_classes+1, hidden_size, num_layers, batch_first=True)
@@ -31,13 +32,15 @@ class LogAnomaly(BaseModel):
     def __init__(self, 
                  num_classes,
                  num_layers,
+                 input_size,
                  hidden_size,
                  top_k,
+                 online_mode,
                  pretrain_matrix, 
                  training_tokens_id):
-        super(LogAnomaly, self).__init__(top_k)
+        super(LogAnomaly, self).__init__(top_k, online_mode)
         self.num_classes = num_classes
-        self.EmbeddingLayer = SemanticsNNEmbedding(num_classes, pretrain_matrix, training_tokens_id)
+        self.EmbeddingLayer = SemanticsNNEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
         self.FC = torch.nn.Linear(hidden_size, num_classes)
         self.LSTMLayer = torch.nn.LSTM(300, hidden_size, num_layers, batch_first=True)
         
@@ -53,16 +56,17 @@ class UniLog(BaseModel):
                  input_size, 
                  hidden_size,
                  top_k,
-                 reset_enabled,
+                 online_mode,
                  embedding_method,
                  pretrain_matrix, 
                  training_tokens_id):
-        super(UniLog, self).__init__(top_k)
+        super(UniLog, self).__init__(top_k, online_mode)
         
         if embedding_method == 'context':
             self.EmbeddingLayer = ContextEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
         elif embedding_method == 'semantics':
             input_size = 300
+            hidden_size = 300
             self.EmbeddingLayer = SemanticsEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
         elif embedding_method == 'combined':
             self.EmbeddingLayer = CombinedEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
@@ -71,45 +75,48 @@ class UniLog(BaseModel):
             exit(0)
             
         self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
-        self.key2label = {}
-        self.reset_enabled = reset_enabled
+        self.num_candidates = 0
+        self.num_classes = num_classes
+        self.padding_idx = num_classes
+        self.reset_enabled = True
         
     def forward(self, input_dict):
         batch_event_ids = input_dict['eventids']
-        batch_templates = input_dict['templates']
-        batch_size = len(batch_event_ids)
+        batch_tokens_id = input_dict['templates']
+        new_tokens_id = []
         
         # Update seen candidates by going through each instance in this batch
-        for batch_ind in range(batch_size):
-            for event_id, template in zip(batch_event_ids[batch_ind], batch_templates[batch_ind]):
-                self.updateCandidates(event_id, template)
+        for batch_ind, event_ids in enumerate(batch_event_ids):
+            for ind, event_id in enumerate(event_ids):
+                if self.num_candidates <= event_id and event_id != self.padding_idx:
+                    self.num_candidates += 1
+                    new_tokens_id.append(batch_tokens_id[batch_ind][ind])
                     
-            next_log = input_dict['next'][batch_ind]
-            self.updateCandidates(next_log['eventid'], next_log['template'])
-            input_dict['next'][batch_ind]['eventid'] = self.key2label[next_log['eventid']]
+        for batch_ind, next_event in enumerate(input_dict['next']):
+            if self.num_candidates <= next_event['eventid'] and next_event['eventid'] != self.padding_idx:
+                new_tokens_id.append(next_event['template'])
+                self.num_candidates += 1
+            if self.padding_idx < next_event['eventid']:
+                input_dict['next'][batch_ind]['eventid'] -= 1
         
-        self.EmbeddingLayer.updateEmbeddingSize(len(self.key2label))
-        candidates_embedding = self.EmbeddingLayer(self.candidates)[-1]
+        if not self.training and len(new_tokens_id) != 0:
+            self.EmbeddingLayer.updateEmbeddingSize(new_tokens_id)
+            
         context_embedding = self.EmbeddingLayer(input_dict)
+        candidates_embedding = self.EmbeddingLayer({'templates': [[]],
+                                                    'eventids': [list(range(self.num_classes))],
+                                                    'next': []})[-1]
         
         output, (hn, cn) = self.LSTMLayer(context_embedding)
         pred = torch.mm(hn[-1], candidates_embedding.t())
         return pred
     
     def resetCandidates(self):
-        self.candidates = {'templates': [[]], 'eventids': [[]], 'next': []}
-        self.key2label.clear()
+        self.num_candidates = 0
         
     def setOptimizer(self, optim):
         self.EmbeddingLayer.setOptimizer(optim)
-        self.optim = optim
-        
-    def updateCandidates(self, event_id, template):
-        if event_id not in self.key2label:
-            self.key2label[event_id] = len(self.key2label)
-            self.candidates['eventids'][0].append(event_id)
-            self.candidates['templates'][0].append(template)
+        self.optim = optim        
 
 class UniLogNet(BaseModel):
     def __init__(self, 
