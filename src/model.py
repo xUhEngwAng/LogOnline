@@ -77,6 +77,7 @@ class UniLog(BaseModel):
         self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.num_candidates = 0
         self.num_classes = num_classes
+        self.num_embeddings = num_classes + 1
         self.padding_idx = num_classes
         self.reset_enabled = True
         
@@ -90,21 +91,25 @@ class UniLog(BaseModel):
             for ind, event_id in enumerate(event_ids):
                 if self.num_candidates <= event_id and event_id != self.padding_idx:
                     self.num_candidates += 1
+                if self.num_embeddings <= event_id:
+                    self.num_embeddings += 1
                     new_tokens_id.append(batch_tokens_id[batch_ind][ind])
                     
         for batch_ind, next_event in enumerate(input_dict['next']):
             if self.num_candidates <= next_event['eventid'] and next_event['eventid'] != self.padding_idx:
-                new_tokens_id.append(next_event['template'])
                 self.num_candidates += 1
+            if self.num_embeddings <= next_event['eventid']:
+                self.num_embeddings += 1
+                new_tokens_id.append(next_event['template'])
             if self.padding_idx < next_event['eventid']:
                 input_dict['next'][batch_ind]['eventid'] -= 1
         
-        if not self.training and len(new_tokens_id) != 0:
+        if len(new_tokens_id) != 0:
             self.EmbeddingLayer.updateEmbeddingSize(new_tokens_id)
             
         context_embedding = self.EmbeddingLayer(input_dict)
         candidates_embedding = self.EmbeddingLayer({'templates': [[]],
-                                                    'eventids': [list(range(self.num_classes))],
+                                                    'eventids': [list(range(self.num_candidates))],
                                                     'next': []})[-1]
         
         output, (hn, cn) = self.LSTMLayer(context_embedding)

@@ -110,7 +110,7 @@ class SemanticsEmbedding(torch.nn.Module):
         self.template_embedder = torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=True)
     
 class SemanticsNNEmbedding(torch.nn.Module):
-    def __init__(self, num_classes, pretrain_matrix, training_tokens_id):
+    def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
         super(SemanticsNNEmbedding, self).__init__()
         self.word_embedder = torch.nn.Embedding.from_pretrained(pretrain_matrix, freeze=True).cuda()
         self.num_classes = num_classes
