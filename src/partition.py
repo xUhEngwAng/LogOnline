@@ -1,5 +1,6 @@
 import logging
 import numpy as np
+import statistics
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -27,9 +28,12 @@ def partitionByOrder(parsed_log_df,
     num_sessions = len(parsed_log_df) / session_size
     num_train_sessions = int(num_sessions * train_ratio)
     sessions_cnt = 0
+    time_elapsed_training = []
     
     session_train, session_test = {}, {}
+    component2ind = {}
     eventid2ind = {}
+    level2ind = {}
     
     for start in range(0, len(parsed_log_df), session_size):
         end = start + session_size
@@ -38,34 +42,70 @@ def partitionByOrder(parsed_log_df,
         if filter_abnormal and True in labels:
             continue
             
-        templates = parsed_log_df['Templates'][start: end].tolist()
+        components = parsed_log_df['Component'][start: end].tolist()
         event_ids = parsed_log_df['EventId'][start: end].tolist()
+        levels = parsed_log_df['Level'][start: end].tolist()
+        templates = parsed_log_df['Templates'][start: end].tolist()
+        time_elapsed = parsed_log_df['TimeElapsed'][start: end].tolist()
         
-        for event_id in event_ids:
-            eventid2ind.setdefault(event_id, len(eventid2ind))
+        time_elapsed_training.extend(time_elapsed)
+            
+        for ind in range(len(event_ids)):
+            component2ind.setdefault(components[ind], len(component2ind))
+            eventid2ind.setdefault(event_ids[ind], len(eventid2ind))
+            level2ind.setdefault(levels[ind], len(level2ind))
          
+        components = [component2ind[component] for component in components]
         event_ids = [eventid2ind[event_id] for event_id in event_ids]
-        session_train[sessions_cnt] = {'templates': templates, 'eventids': event_ids, 'labels': labels}
+        levels = [level2ind[level] for level in levels]
+        
+        session_train[sessions_cnt] = {'components': components,
+                                       'eventids': event_ids,
+                                       'labels': labels, 
+                                       'levels': levels,
+                                       'templates': templates,
+                                       'time_elapsed': time_elapsed}
         
         sessions_cnt += 1
         if sessions_cnt == num_train_sessions:
             break
-            
-    num_training_events = len(eventid2ind)
-    eventid2ind['<padding>'] = num_training_events
+          
+    mean = statistics.mean(time_elapsed_training)
+    stddev = statistics.stdev(time_elapsed_training)
+    
+    for key, session in session_train.items():
+        session['time_elapsed'] = [(entry-mean)/stddev for entry in session['time_elapsed']]
+    
+    logger.info(f'Training sessions generated, mean = {mean}, stddev = {stddev}.')
+    num_components, num_events, num_levels = len(component2ind), len(eventid2ind), len(level2ind)
+    eventid2ind['<padding>'] = num_events
     
     for start in range(start+session_size, len(parsed_log_df), session_size):
         end = start + session_size
         
         labels = parsed_log_df['Anomaly'][start: end].tolist()
-        templates = parsed_log_df['Templates'][start: end].tolist()
+        components = parsed_log_df['Component'][start: end].tolist()
         event_ids = parsed_log_df['EventId'][start: end].tolist()
+        levels = parsed_log_df['Level'][start: end].tolist()
+        templates = parsed_log_df['Templates'][start: end].tolist()
+        time_elapsed = parsed_log_df['TimeElapsed'][start: end].tolist()
+        time_elapsed = [(entry-mean)/stddev for entry in time_elapsed]
         
-        for event_id in event_ids:
-            eventid2ind.setdefault(event_id, len(eventid2ind))
-         
+        for ind in range(len(event_ids)):
+            component2ind.setdefault(components[ind], len(component2ind))
+            eventid2ind.setdefault(event_ids[ind], len(eventid2ind))
+            level2ind.setdefault(levels[ind], len(level2ind))
+            
+        components = [component2ind[component] for component in components]
         event_ids = [eventid2ind[event_id] for event_id in event_ids]
-        session_test[sessions_cnt] = {'templates': templates, 'eventids': event_ids, 'labels': labels}
+        levels = [level2ind[level] for level in levels]
+        
+        session_test[sessions_cnt] = {'components': components,
+                                      'eventids': event_ids,
+                                      'labels': labels, 
+                                      'levels': levels,
+                                      'templates': templates,
+                                      'time_elapsed': time_elapsed}
         sessions_cnt += 1
         
     # Write back converted event_ids to original Dataframe
@@ -74,7 +114,7 @@ def partitionByOrder(parsed_log_df,
     logger.info(f'partitionByOrder done, {sessions_cnt} sessions are generated.')
     logger.info(f'Sequential Partitioning done. {len(eventid2ind)} event ids are identified.') 
     logger.info(f'Number of training and testing sessions are {len(session_train)} and {len(session_test)}.')
-    return session_train, session_test, num_training_events
+    return session_train, session_test, num_components, num_events, num_levels, level2ind
 
 def partitionByOrderShuffle(parsed_log_df,
                             session_size,
@@ -131,8 +171,9 @@ def partitionBySession(parsed_log_df,
                        filter_abnormal):
     session_train, session_test = {}, {}
     groups = parsed_log_df.groupby(by='Session')
-    eventid2ind = {}
+    component2ind, eventid2ind, level2ind = {}, {}, {}
     test_groups = []
+    time_elapsed_training = []
     
     for group_name, group in groups:
         labels = group['Anomaly'].tolist()
@@ -146,29 +187,70 @@ def partitionBySession(parsed_log_df,
             
         templates = group['Templates'].tolist()
         event_ids = group['EventId'].tolist()
+        components = group['Component'].tolist()
+        levels = group['Level'].tolist()
+        timestamps = group['Timestamp'].tolist()
         
-        for event_id in event_ids:
-            eventid2ind.setdefault(event_id, len(eventid2ind))
+        time_elapsed = [0]
+        time_elapsed.extend([timestamps[ind] - timestamps[ind-1] for ind in range(1, len(timestamps))])
+        time_elapsed_training.extend(time_elapsed)
+        
+        for ind in range(len(event_ids)):
+            component2ind.setdefault(components[ind], len(component2ind))
+            eventid2ind.setdefault(event_ids[ind], len(eventid2ind))
+            level2ind.setdefault(levels[ind], len(level2ind))
          
+        components = [component2ind[component] for component in components]
         event_ids = [eventid2ind[event_id] for event_id in event_ids]
-        session = {'templates': templates, 'eventids': event_ids, 'labels': labels}
+        levels = [level2ind[level] for level in levels]
+        
+        session = {'components': components,
+                   'eventids': event_ids,
+                   'labels': labels, 
+                   'levels': levels,
+                   'templates': templates,
+                   'time_elapsed': time_elapsed}
         session_train[group_name] = session
         
-    num_training_events = len(eventid2ind)
-    eventid2ind['<padding>'] = num_training_events
+    mean = statistics.mean(time_elapsed_training)
+    stddev = statistics.stdev(time_elapsed_training)
+    
+    for key, session in session_train.items():
+        session['time_elapsed'] = [(entry-mean)/stddev for entry in session['time_elapsed']]
+    
+    logger.info(f'Training sessions generated, mean = {mean}, stddev = {stddev}.')    
+    num_components, num_events, num_levels = len(component2ind), len(eventid2ind), len(level2ind)
+    eventid2ind['<padding>'] = num_events
     
     for group_name in test_groups:
         group = groups.get_group(group_name)
         
         templates = group['Templates'].tolist()
         event_ids = group['EventId'].tolist()
+        components = group['Component'].tolist()
         labels = group['Anomaly'].tolist()
+        levels = group['Level'].tolist()
+        timestamps = group['Timestamp'].tolist()
         
-        for event_id in event_ids:
-            eventid2ind.setdefault(event_id, len(eventid2ind))
+        time_elapsed = [0]
+        time_elapsed.extend([timestamps[ind] - timestamps[ind-1] for ind in range(1, len(timestamps))])
+        time_elapsed = [(entry-mean)/stddev for entry in time_elapsed]
+        
+        for ind in range(len(event_ids)):
+            component2ind.setdefault(components[ind], len(component2ind))
+            eventid2ind.setdefault(event_ids[ind], len(eventid2ind))
+            level2ind.setdefault(levels[ind], len(level2ind))
          
+        components = [component2ind[component] for component in components]
         event_ids = [eventid2ind[event_id] for event_id in event_ids]
-        session = {'templates': templates, 'eventids': event_ids, 'labels': labels}
+        levels = [level2ind[level] for level in levels]
+        
+        session = {'components': components,
+                   'eventids': event_ids,
+                   'labels': labels, 
+                   'levels': levels,
+                   'templates': templates,
+                   'time_elapsed': time_elapsed}
         session_test[group_name] = session
             
     # Write back converted event_ids to original Dataframe
@@ -177,5 +259,5 @@ def partitionBySession(parsed_log_df,
     logger.info(f'partitionBySession done, {len(groups)} sessions are generated.')
     logger.info(f'Session Partitioning done. {len(eventid2ind)} event ids are identified.') 
     logger.info(f'Number of training and testing sessions are {len(session_train)} and {len(session_test)}')
-    return session_train, session_test, num_training_events
+    return session_train, session_test, num_components, num_events, num_levels, level2ind
     

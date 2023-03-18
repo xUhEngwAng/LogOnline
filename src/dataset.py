@@ -36,6 +36,9 @@ class LogDataset(Dataset):
             if isinstance(seq[0], int):
                 ret = [padding_idx] * (length - len(seq))
                 ret.extend(seq)
+            elif isinstance(seq[0], float):
+                ret = [float(padding_idx)] * (length - len(seq))
+                ret.extend(seq)
             elif isinstance(seq[0], str):
                 ret = ['<PADDING>'] * (length - len(seq))
                 ret.extend(seq)
@@ -56,8 +59,11 @@ class LogDataset(Dataset):
         end = start + self.window_size + 1
         
         session_key = session['key']
+        time_elapsed = self.pad(session['time_elapsed'][start: end], self.window_size+1, -1)
+        components = self.pad(session['components'][start: end], self.window_size+1, self.padding_idx)
         templates = self.pad(session['templates'][start: end], self.window_size+1, self.padding_idx)
         event_ids = self.pad(session['eventids'][start: end], self.window_size+1, self.padding_idx)
+        levels = self.pad(session['levels'][start: end], self.window_size+1, self.padding_idx)
         labels = session['labels'][start: end]
         
         # whether the next log is marked as anomaly
@@ -67,5 +73,8 @@ class LogDataset(Dataset):
         return {'session_key': session_key,
                 'templates': templates[:-1],
                 'eventids': event_ids[:-1],
+                'components': components,
+                'levels': levels,
+                'time_elapsed': time_elapsed,
                 'next': next_log,
                 'anomaly': anomaly}

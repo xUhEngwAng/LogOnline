@@ -1,10 +1,10 @@
 import os
 import pandas as pd
 import re
-
 import sys
 sys.path.append("./")
 
+from datetime import datetime
 from SPINE.log_parser import LogParser
 from SPINE.evaluator import evaluate
         
@@ -54,7 +54,7 @@ def preprocessHDFS(config,
                    HDFS_log_path, 
                    HDFS_label_path,
                    evaluation=False):
-    log_list = []
+    components, log_list, levels, timestamps = [], [], [], [], []
     log_file_dir = os.path.split(HDFS_log_path)[0]
     log_file_name = os.path.split(HDFS_log_path)[1].split('.')[0]
     
@@ -64,6 +64,12 @@ def preprocessHDFS(config,
             log_line = log_line.partition(": ")[2][:-1]
             log_list.append(log_line)
             
+            header = log_line.partition(": ")[0].split()
+            timestamp = int(datetime.strptime(header[0]+header[1], '%y%m%d%H%M%S').timestamp())
+            timestamps.append(timestamp)
+            levels.append(header[3])
+            components.append(header[4])
+            
     parser = LogParser(config)
     parser.fit_parse(log_list, n_nodes=4)
     
@@ -71,6 +77,10 @@ def preprocessHDFS(config,
     parsed_log_df = assemble_result(result_path_prefix)
     parsed_log_df['LogMessage'] = log_list
     parsed_log_df['Session'] = parsed_log_df['LogMessage'].apply(extractBlockId)
+
+    parsed_log_df['Component'] = components
+    parsed_log_df['Level'] = levels
+    parsed_log_df['Timestamp'] = timestamps
     
     if HDFS_label_path is not None:
         anomaly_label_df = pd.read_csv(HDFS_label_path)
@@ -100,7 +110,7 @@ def preprocessHDFS(config,
 def preprocessBGL(config,
                   BGL_log_path,
                   evaluation=False):
-    log_list, labels, timestamps, nodes = [], [], [], []
+    components, log_list, labels, levels, nodes, timestamps = [], [], [], [], []
     log_file_dir = os.path.split(BGL_log_path)[0]
     log_file_name = os.path.split(BGL_log_path)[1].split('.')[0]
     
@@ -109,9 +119,11 @@ def preprocessBGL(config,
             # remove header & \n at the end of each line
             log_tokens = log_line.split()
             
+            components.append(log_tokens[7])
             labels.append(log_tokens[0] != '-')
-            timestamps.append(int(log_tokens[1]))
+            levels.append(log_tokens[8])
             nodes.append(log_tokens[3])
+            timestamps.append(int(log_tokens[1]))
             
             log_line = ' '.join(log_tokens[9:])
             log_list.append(log_line)
@@ -122,12 +134,18 @@ def preprocessBGL(config,
     result_path_prefix = config.get('result_path_prefix')
     parsed_log_df = assemble_result(result_path_prefix)
     
-    parsed_log_df['LogMessage'] = log_list
+    time_elapsed = [0]
+    time_elapsed.extend([timestamps[ind] - timestamps[ind-1] for ind in range(1, len(timestamps))])
+    
     parsed_log_df['Anomaly'] = labels
-    parsed_log_df['Timestamp'] = timestamps
+    parsed_log_df['Component'] = components
+    parsed_log_df['LogMessage'] = log_list
+    parsed_log_df['Level'] = levels
     parsed_log_df['Session'] = nodes
+    parsed_log_df['Timestamp'] = timestamps
+    parsed_log_df['TimeElapsed'] = time_elapsed
 
-    # dump parsed structured HDFS logs to file
+    # dump parsed structured logs to file
     parsed_result_name = log_file_name + "_parsed_result.csv"
     parsed_result_path = os.path.join("./data/BGL", parsed_result_name)
     parsed_log_df.to_csv(parsed_result_path, index=False)

@@ -16,12 +16,19 @@ def collate_fn(batch_input_dict):
     keys = [input_dict['session_key'] for input_dict in batch_input_dict]
     templates = [input_dict['templates'] for input_dict in batch_input_dict]
     event_ids = [input_dict['eventids'] for input_dict in batch_input_dict]
+    time_elapsed = [input_dict['time_elapsed'] for input_dict in batch_input_dict]
+    components = [input_dict['components'] for input_dict in batch_input_dict]
+    levels = [input_dict['levels'] for input_dict in batch_input_dict]
+    
     next_logs = [input_dict['next'] for input_dict in batch_input_dict]
     anomaly = [input_dict['anomaly'] for input_dict in batch_input_dict]
-    
+
     return {'session_key': keys,
             'templates': templates,
             'eventids': event_ids,
+            'time_elapsed': time_elapsed,
+            'components': components,
+            'levels': levels,
             'next': next_logs,
             'anomaly': anomaly}
 
@@ -42,7 +49,7 @@ if __name__ == '__main__':
     # other general arguments
     parser.add_argument('--embedding_method', default='context', type=str, help='the chosen embedding layer of UniLog model')
     parser.add_argument('--filter_abnormal', action='store_true')
-    parser.add_argument('--lr', default=0.1, type=float)
+    parser.add_argument('--lr', default=0.5, type=float)
     parser.add_argument('--model', default='deeplog', type=str)
     parser.add_argument('--n_epoch', default=300, type=int)
     parser.add_argument('--online_mode', action='store_true')
@@ -81,12 +88,12 @@ if __name__ == '__main__':
             embedding_matrix = buildVocab(parsed_log_df, args.pretrain_path)
                 
     # Dataset Preparation
-    session_train, session_test, num_classes = partition(parsed_log_df, 
-                                                         args.partition_method, 
-                                                         args.train_ratio, 
-                                                         args.filter_abnormal,
-                                                         args.session_size,
-                                                         args.shuffle)
+    session_train, session_test, num_components, num_classes, num_levels, level2ind = partition(parsed_log_df, 
+                                                                                                args.partition_method, 
+                                                                                                args.train_ratio, 
+                                                                                                args.filter_abnormal,
+                                                                                                args.session_size,
+                                                                                                args.shuffle)
     
     # Obtain unique templates of the training data
     eventid_templates = {}
