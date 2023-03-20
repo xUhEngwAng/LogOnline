@@ -3,6 +3,8 @@ import numpy as np
 import time
 import torch
 
+from autoencoder import AutoEncoder
+
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -12,8 +14,14 @@ class BaseModel(torch.nn.Module):
         self.loss = torch.nn.CrossEntropyLoss()
         self.optim = None
         self.topk = topk
-        self.bottomk = 10
         self.online_mode = online_mode
+        
+        if self.online_mode:
+            self.thresh = 0.06
+            autoencoder = AutoEncoder(9, 6, 11, self.thresh)
+            autoencoder.load_state_dict(torch.load('./checkpoint/bgl_ae_05.pth'))
+            self.autoencoder = autoencoder.eval()
+            self.autoencoder_loss = torch.nn.MSELoss(reduction='none')
     
     def evaluate(self, test_loader):
         if self.online_mode:
@@ -22,60 +30,38 @@ class BaseModel(torch.nn.Module):
         else:
             model = self.eval()
             
-        session_dict = {}
         batch_cnt = 0
         confident_instances = 0
         total_loss = 0
+        session_dict = {}
+        loss = torch.nn.CrossEntropyLoss(reduction='none')
         
         for batch in test_loader:
             pred = model.forward(batch)
             
             batch_cnt += 1
-            batch_size = len(batch['next'])
+            batch_size, num_classes = pred.shape[0], pred.shape[1]
             
-            _, batch_topk_pred = torch.topk(pred, self.topk)
-            _, batch_btmk_pred = torch.topk(pred, self.bottomk, largest=False)
-            batch_topk_pred_lst = batch_topk_pred.tolist()
-            batch_btmk_pred_lst = batch_btmk_pred.tolist()
             batch_next_log = [next_log['eventid'] for next_log in batch['next']]
-            
-            matched = []
-            unmatched = [next_log in btmk_pred for next_log, btmk_pred in zip(batch_next_log, batch_btmk_pred_lst)]
-            
-            for topk in range(self.topk):
-                curr_matched = [batch_topk_pred_lst[ind][topk] == batch_next_log[ind] for ind in range(batch_size)]
-                if 0 < len(matched):
-                    prev_matched = matched[-1]
-                    curr_matched = [prev|curr for prev, curr in zip(prev_matched, curr_matched)]
-                matched.append(curr_matched)
+            batch_ranking = torch.sum(torch.gt(pred.t(), pred[range(batch_size), batch_next_log]), axis=0)
+            batch_ranking_list = batch_ranking.tolist()
                 
             # back-propagation in online mode
-            '''
             if self.online_mode:
-                weight_ = [0 if unmatched[ind] else 1 for ind in range(batch_size)]
-                confident_instances += sum(weight_)
-                weight = torch.tensor(weight_, dtype=torch.float).to('cuda')
+                batch_embedding, output = self.autoencoder(batch)
+                batch_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
+                weight = torch.lt(batch_loss, self.thresh).to(torch.float)
+                weight_sum = torch.sum(weight).item()
+                confident_instances += weight_sum
+                   
                 label = torch.tensor(batch_next_log).to('cuda')
-                loss = torch.nn.CrossEntropyLoss(reduction='none')
                 batch_loss = loss(pred, label)
-                batch_loss = torch.matmul(batch_loss, weight) / (sum(weight_) + 1e-6)
-                
-                self.optim.zero_grad()
-                batch_loss.backward()
-                self.optim.step()
-            '''
-                
-            # Use BCELoss as the loss function
-            if self.online_mode:
-                label = torch.tensor([0 if unmatched[ind] else 1 for ind in range(batch_size)], dtype=torch.float).to('cuda')
-                pred_softmax = torch.nn.functional.softmax(pred)
-                loss = torch.nn.BCELoss()
-                batch_loss = loss(pred_softmax[range(batch_size), batch_next_log], label)
+                batch_loss = torch.matmul(batch_loss, weight) / (weight_sum + 1e-6)
                 total_loss += batch_loss
                 
                 self.optim.zero_grad()
                 batch_loss.backward()
-                self.optim.step()
+                self.optim.step()       
 
             for ind in range(batch_size):
                 session_key = batch['session_key'][ind]
@@ -86,9 +72,9 @@ class BaseModel(torch.nn.Module):
                 session_dict[session_key]['anomaly'] |= label
                 
                 for topk in range(self.topk):
-                    session_dict[session_key][f'matched_{topk}'] &= matched[topk][ind]
+                    session_dict[session_key][f'matched_{topk}'] &= (batch_ranking_list[ind] <= topk)
                     
-        # logger.info(f'{confident_instances} instances are used for training in online mode.')
+        logger.info(f'{confident_instances} instances are used for training in online mode.')
         
         TP = [0] * self.topk
         FP = [0] * self.topk
@@ -155,4 +141,3 @@ class BaseModel(torch.nn.Module):
             
     def setOptimizer(self, optim):
         self.optim = optim
-            

@@ -5,6 +5,29 @@ import torch
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+class AutoEncoderEmbedding(torch.nn.Module):
+    def __init__(self, num_components, num_levels):
+        super(AutoEncoderEmbedding, self).__init__()
+        self.num_components = num_components
+        self.num_levels = num_levels
+        
+        components_embedding = torch.vstack([torch.eye(num_components), torch.zeros(1, num_components)])
+        levels_embedding = torch.vstack([torch.eye(num_levels), torch.zeros(1, num_levels)])
+        self.component_embedder = torch.nn.Embedding.from_pretrained(components_embedding, freeze=True)
+        self.level_embedder = torch.nn.Embedding.from_pretrained(levels_embedding, freeze=True)
+        
+    def forward(self, input_dict):
+        components = torch.tensor(input_dict['components'])
+        levels = torch.tensor(input_dict['levels'])
+        time_elapsed = torch.tensor(input_dict['time_elapsed']).unsqueeze(-1).cuda()
+        
+        components[self.num_components < components] = self.num_components
+        levels[self.num_levels < levels] = self.num_levels
+        
+        components_embedding = self.component_embedder(components.cuda())
+        levels_embedding = self.level_embedder(levels.cuda())
+        return torch.cat([time_elapsed, components_embedding, levels_embedding], dim=2)
+                             
 class ContextEmbedding(torch.nn.Module):
     def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
         
