@@ -23,7 +23,7 @@ def split(sentence):
 
 def buildVocab(parsed_log_df, pretrain_path):
     # Obtain all unique vocabularies from structured log templates
-    templates = parsed_log_df['Templates'].tolist()
+    templates = parsed_log_df['EventTemplate'].tolist()
     template_tokens = [split(template) for template in templates]
     uniq_tokens = set(itertools.chain(*template_tokens))
     logger.info(f'buildVocab identified {len(uniq_tokens)} unique tokens in structured log Dataframe.')
@@ -65,5 +65,5 @@ def buildVocab(parsed_log_df, pretrain_path):
             
         list_tokens_id.append(tokens_id)
         
-    parsed_log_df['Templates'] = list_tokens_id
+    parsed_log_df['EventTemplate'] = list_tokens_id
     return torch.tensor(embeddings)

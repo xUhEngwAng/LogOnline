@@ -61,8 +61,8 @@ def preprocessHDFS(config,
     with open(HDFS_log_path) as f:
         for log_line in f.readlines():
             # remove header & \n at the end of each line
-            log_line = log_line.partition(": ")[2][:-1]
-            log_list.append(log_line)
+            log_body = log_line.partition(": ")[2][:-1]
+            log_list.append(log_body)
             
             header = log_line.partition(": ")[0].split()
             timestamp = int(datetime.strptime(header[0]+header[1], '%y%m%d%H%M%S').timestamp())
@@ -134,16 +134,12 @@ def preprocessBGL(config,
     result_path_prefix = config.get('result_path_prefix')
     parsed_log_df = assemble_result(result_path_prefix)
     
-    time_elapsed = [0]
-    time_elapsed.extend([timestamps[ind] - timestamps[ind-1] for ind in range(1, len(timestamps))])
-    
     parsed_log_df['Anomaly'] = labels
     parsed_log_df['Component'] = components
     parsed_log_df['LogMessage'] = log_list
     parsed_log_df['Level'] = levels
     parsed_log_df['Session'] = nodes
     parsed_log_df['Timestamp'] = timestamps
-    parsed_log_df['TimeElapsed'] = time_elapsed
 
     # dump parsed structured logs to file
     parsed_result_name = log_file_name + "_parsed_result.csv"

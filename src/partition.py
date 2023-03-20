@@ -45,9 +45,11 @@ def partitionByOrder(parsed_log_df,
         components = parsed_log_df['Component'][start: end].tolist()
         event_ids = parsed_log_df['EventId'][start: end].tolist()
         levels = parsed_log_df['Level'][start: end].tolist()
-        templates = parsed_log_df['Templates'][start: end].tolist()
-        time_elapsed = parsed_log_df['TimeElapsed'][start: end].tolist()
+        templates = parsed_log_df['EventTemplate'][start: end].tolist()
+        timestamps = parsed_log_df['Timestamp'][start: end].tolist()
         
+        time_elapsed = [0]
+        time_elapsed.extend([timestamps[ind] - timestamps[ind-1] for ind in range(1, len(timestamps))])
         time_elapsed_training.extend(time_elapsed)
             
         for ind in range(len(event_ids)):
@@ -87,8 +89,11 @@ def partitionByOrder(parsed_log_df,
         components = parsed_log_df['Component'][start: end].tolist()
         event_ids = parsed_log_df['EventId'][start: end].tolist()
         levels = parsed_log_df['Level'][start: end].tolist()
-        templates = parsed_log_df['Templates'][start: end].tolist()
-        time_elapsed = parsed_log_df['TimeElapsed'][start: end].tolist()
+        templates = parsed_log_df['EventTemplate'][start: end].tolist()
+        timestamps = parsed_log_df['Timestamp'][start: end].tolist()
+        
+        time_elapsed = [0]
+        time_elapsed.extend([timestamps[ind] - timestamps[ind-1] for ind in range(1, len(timestamps))])
         time_elapsed = [(entry-mean)/stddev for entry in time_elapsed]
         
         for ind in range(len(event_ids)):
@@ -127,7 +132,7 @@ def partitionByOrderShuffle(parsed_log_df,
     
     for start in range(0, len(parsed_log_df), session_size):
         end = start + session_size
-        templates = parsed_log_df['Templates'][start: end].tolist()
+        templates = parsed_log_df['EventTemplate'][start: end].tolist()
         event_ids = parsed_log_df['EventId'][start: end].tolist()
         labels = parsed_log_df['Anomaly'][start: end].tolist()
         
@@ -185,7 +190,7 @@ def partitionBySession(parsed_log_df,
             test_groups.append(group_name)
             continue
             
-        templates = group['Templates'].tolist()
+        templates = group['EventTemplate'].tolist()
         event_ids = group['EventId'].tolist()
         components = group['Component'].tolist()
         levels = group['Level'].tolist()
@@ -225,7 +230,7 @@ def partitionBySession(parsed_log_df,
     for group_name in test_groups:
         group = groups.get_group(group_name)
         
-        templates = group['Templates'].tolist()
+        templates = group['EventTemplate'].tolist()
         event_ids = group['EventId'].tolist()
         components = group['Component'].tolist()
         labels = group['Anomaly'].tolist()

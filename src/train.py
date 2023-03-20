@@ -69,7 +69,7 @@ if __name__ == '__main__':
     logger.info(f"Using {device} device.")
     
     parsed_log_df = pd.read_csv(args.path)
-    parsed_log_df.fillna({'Templates': ''}, inplace=True)
+    parsed_log_df.fillna({'EventTemplate': ''}, inplace=True)
     logger.info(f'Loading structured log file from {args.path}, {len(parsed_log_df)} log messages loaded.')
     
     # Load Pretrained word embeddings
@@ -99,9 +99,13 @@ if __name__ == '__main__':
     eventid_templates = {}
     
     for ind, event_id in enumerate(parsed_log_df['EventId']):
+        try:
+            event_id = int(event_id)
+        except:
+            continue
         if num_classes <= event_id:
             continue
-        eventid_templates.setdefault(event_id, parsed_log_df['Templates'][ind])
+        eventid_templates.setdefault(event_id, parsed_log_df['EventTemplate'][ind])
         
     training_uniq_templates = list(eventid_templates.values())
     logger.info(f'{len(training_uniq_templates)} unique templates identified in training data.')
