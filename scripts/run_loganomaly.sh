@@ -1,10 +1,11 @@
-CUDA_VISIBLE_DEVICES=1 nohup \
-python ./src/train.py \
-       ./data/HDFS/HDFS_parsed_result_03.csv \
-       --filter_abnormal \
-       --hidden_size 128 \
-       --lr 0.1 \
-       --model loganomaly \
-       --n_epoch 30 \
-       --pretrain_path ./data/wiki-news-300d-1M.vec \
-       --top_k 9
+export CUDA_VISIBLE_DEVICES=0
+nohup python ./src/train.py ./data/BGL/BGL_parsed_result_03.csv \
+--filter_abnormal \
+--model loganomaly \
+--n_epoch 50 \
+--online_mode \
+--partition_method timestamp \
+--session_size 200 \
+--top_k 40 \
+--window_size 10 \
+>> ./log/bgl_timestamp_200_02/loganomaly_online.log 2>&1 &
