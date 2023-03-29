@@ -59,7 +59,7 @@ class LogDataset(Dataset):
         end = start + self.window_size + 1
         
         session_key = session['key']
-        time_elapsed = self.pad(session['time_elapsed'][start: end], self.window_size+1, -1)
+        elapsed_time = self.pad(session['elapsedtime'][start: end], self.window_size+1, -1)
         components = self.pad(session['components'][start: end], self.window_size+1, self.padding_idx)
         templates = self.pad(session['templates'][start: end], self.window_size+1, self.padding_idx)
         event_ids = self.pad(session['eventids'][start: end], self.window_size+1, self.padding_idx)
@@ -75,6 +75,6 @@ class LogDataset(Dataset):
                 'eventids': event_ids[:-1],
                 'components': components,
                 'levels': levels,
-                'time_elapsed': time_elapsed,
+                'elapsedtime': elapsed_time,
                 'next': next_log,
                 'anomaly': anomaly}
