@@ -17,9 +17,10 @@ class BaseModel(torch.nn.Module):
         self.online_mode = online_mode
         
         if self.online_mode:
-            self.thresh = 0.06
-            autoencoder = AutoEncoder(9, 6, 11, self.thresh)
-            autoencoder.load_state_dict(torch.load('./checkpoint/bgl_ae_05.pth'))
+            self.thresh = 0.02
+            autoencoder = AutoEncoder(9, 6, 11, self.thresh).cuda()
+            autoencoder.load_state_dict(torch.load('./checkpoint/bgl_ae_05_newpartition.pth'))
+            # autoencoder.load_state_dict(torch.load('./checkpoint/hdfs_ae_08_epoch10.pth'))
             self.autoencoder = autoencoder.eval()
             self.autoencoder_loss = torch.nn.MSELoss(reduction='none')
     

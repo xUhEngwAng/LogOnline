@@ -12,7 +12,7 @@ def partition(log_df,
     if partition_method == 'session':
         session_train, session_test =  partitionBySession(log_df, train_ratio)
         logger.info('partitionBySession done.')
-    if shuffle:
+    elif shuffle:
         session_train, session_test = partitionByOrderShuffle(log_df, session_size, train_ratio)
         logger.info('partitionByOrderShuffle done.')
     else:
@@ -82,6 +82,7 @@ def partitionBySession(log_df, train_ratio):
     @param log_df: parsed log in DataFrame format
     @param train_ratio: controls the ratio of training data
     '''
+    np.random.seed(42)
     groups = log_df.groupby(by='Session')
     session_train, session_test = {}, {}
     
