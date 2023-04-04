@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 
 from dataset import LogDataset
+from feature import extractFeatures
 from model import DeepLog, LogAnomaly, UniLog
 from partition import partition
 from torch.utils.data import DataLoader
@@ -16,7 +17,7 @@ def collate_fn(batch_input_dict):
     keys = [input_dict['session_key'] for input_dict in batch_input_dict]
     templates = [input_dict['templates'] for input_dict in batch_input_dict]
     event_ids = [input_dict['eventids'] for input_dict in batch_input_dict]
-    time_elapsed = [input_dict['time_elapsed'] for input_dict in batch_input_dict]
+    elapsed_time = [input_dict['elapsedtime'] for input_dict in batch_input_dict]
     components = [input_dict['components'] for input_dict in batch_input_dict]
     levels = [input_dict['levels'] for input_dict in batch_input_dict]
     
@@ -26,7 +27,7 @@ def collate_fn(batch_input_dict):
     return {'session_key': keys,
             'templates': templates,
             'eventids': event_ids,
-            'time_elapsed': time_elapsed,
+            'elapsedtime': elapsed_time,
             'components': components,
             'levels': levels,
             'next': next_logs,
@@ -48,7 +49,6 @@ if __name__ == '__main__':
     
     # other general arguments
     parser.add_argument('--embedding_method', default='context', type=str, help='the chosen embedding layer of UniLog model')
-    parser.add_argument('--filter_abnormal', action='store_true')
     parser.add_argument('--lr', default=0.5, type=float)
     parser.add_argument('--model', default='deeplog', type=str)
     parser.add_argument('--n_epoch', default=300, type=int)
@@ -59,6 +59,7 @@ if __name__ == '__main__':
     parser.add_argument('--shuffle', action='store_true')
     parser.add_argument('--top_k', default=9, type=int)
     parser.add_argument('--train_ratio', default=0.8, type=float)
+    parser.add_argument('--unsupervised', action='store_true', help='unsupervised training of specified model')
     
     args = parser.parse_args()
     
@@ -88,38 +89,41 @@ if __name__ == '__main__':
             embedding_matrix = buildVocab(parsed_log_df, args.pretrain_path)
                 
     # Dataset Preparation
-    session_train, session_test, num_components, num_classes, num_levels, level2ind = partition(parsed_log_df, 
-                                                                                                args.partition_method, 
-                                                                                                args.train_ratio, 
-                                                                                                args.filter_abnormal,
-                                                                                                args.session_size,
-                                                                                                args.shuffle)
+    session_train, session_test = partition(parsed_log_df, 
+                                            args.partition_method, 
+                                            args.session_size,
+                                            args.shuffle,
+                                            args.train_ratio)
+    
+    num_components, num_events, num_levels, uniq_events = extractFeatures(session_train, session_test, args.unsupervised)
+    logger.info(f'Number of training and testing sessions after feature extraction are {len(session_train)} and {len(session_test)}.')
     
     # Obtain unique templates of the training data
     eventid_templates = {}
     
     for ind, event_id in enumerate(parsed_log_df['EventId']):
+        event_id = uniq_events.get(event_id, event_id)
         try:
             event_id = int(event_id)
         except:
             continue
-        if num_classes <= event_id:
+        if num_events <= event_id:
             continue
         eventid_templates.setdefault(event_id, parsed_log_df['EventTemplate'][ind])
         
+    eventid_templates = {k: eventid_templates[k] for k in sorted(eventid_templates)}
     training_uniq_templates = list(eventid_templates.values())
     logger.info(f'{len(training_uniq_templates)} unique templates identified in training data.')
-    assert(len(training_uniq_templates) == num_classes)
     
     dataset_train = LogDataset(session_train, 
                                args.window_size, 
                                args.step_size, 
-                               num_classes)
+                               num_events)
     
     dataset_test = LogDataset(session_test, 
                               args.window_size, 
                               args.step_size, 
-                              num_classes)
+                              num_events)
     
     logger.info(f'Successfully loaded training dataset, which has {len(dataset_train)} instances.')
     logger.info(f'Successfully loaded testing dataset, which has {len(dataset_test)} instances.')
@@ -138,7 +142,7 @@ if __name__ == '__main__':
     
     if args.model == 'deeplog':
         logger.info(f'Initializing DeepLog model.')
-        model = DeepLog(num_classes,
+        model = DeepLog(num_events,
                         args.num_layers, 
                         args.hidden_size, 
                         args.top_k,
@@ -146,7 +150,7 @@ if __name__ == '__main__':
         
     elif args.model == 'loganomaly':
         logger.info(f'Initializing LogAnomaly model.')
-        model = LogAnomaly(num_classes,
+        model = LogAnomaly(num_events,
                            args.num_layers, 
                            args.input_size,
                            args.hidden_size, 
@@ -157,7 +161,7 @@ if __name__ == '__main__':
         
     elif args.model == 'unilog':
         logger.info(f'Initializing UniLog model, embedding_method: {args.embedding_method}.')
-        model = UniLog(num_classes,
+        model = UniLog(num_events,
                        args.num_layers,
                        args.input_size,
                        args.hidden_size,
@@ -170,7 +174,7 @@ if __name__ == '__main__':
         logger.error(f'Fatal error, unrecognised model {args.model}.')
         exit(0)
         
-    logger.info(f'num_classes: {num_classes}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.top_k}, optimizer: {args.optimizer}, lr: {args.lr}, train_ratio: {args.train_ratio}, window_size: {args.window_size}.')
+    logger.info(f'num_classes: {num_events}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.top_k}, optimizer: {args.optimizer}, lr: {args.lr}, train_ratio: {args.train_ratio}, window_size: {args.window_size}.')
 
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)

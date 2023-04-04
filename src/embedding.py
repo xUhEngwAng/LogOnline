@@ -19,7 +19,7 @@ class AutoEncoderEmbedding(torch.nn.Module):
     def forward(self, input_dict):
         components = torch.tensor(input_dict['components'])
         levels = torch.tensor(input_dict['levels'])
-        time_elapsed = torch.tensor(input_dict['time_elapsed']).unsqueeze(-1).cuda()
+        time_elapsed = torch.tensor(input_dict['elapsedtime']).unsqueeze(-1).cuda()
         
         components[self.num_components < components] = self.num_components
         levels[self.num_levels < levels] = self.num_levels
