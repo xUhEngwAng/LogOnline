@@ -13,26 +13,6 @@ from vocab import buildVocab
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def collate_fn(batch_input_dict):
-    keys = [input_dict['session_key'] for input_dict in batch_input_dict]
-    templates = [input_dict['templates'] for input_dict in batch_input_dict]
-    event_ids = [input_dict['eventids'] for input_dict in batch_input_dict]
-    elapsed_time = [input_dict['elapsedtime'] for input_dict in batch_input_dict]
-    components = [input_dict['components'] for input_dict in batch_input_dict]
-    levels = [input_dict['levels'] for input_dict in batch_input_dict]
-    
-    next_logs = [input_dict['next'] for input_dict in batch_input_dict]
-    anomaly = [input_dict['anomaly'] for input_dict in batch_input_dict]
-
-    return {'session_key': keys,
-            'templates': templates,
-            'eventids': event_ids,
-            'elapsedtime': elapsed_time,
-            'components': components,
-            'levels': levels,
-            'next': next_logs,
-            'anomaly': anomaly}
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('path', type=str, help='path of structured log file')
@@ -47,16 +27,21 @@ if __name__ == '__main__':
     parser.add_argument('--step_size', default=1, type=int)
     parser.add_argument('--window_size', default=10, type=int)
     
-    # other general arguments
-    parser.add_argument('--embedding_method', default='context', type=str, help='the chosen embedding layer of UniLog model')
-    parser.add_argument('--lr', default=0.5, type=float)
-    parser.add_argument('--model', default='deeplog', type=str)
-    parser.add_argument('--n_epoch', default=300, type=int)
+    # autoencoder-related arguments
+    parser.add_argument('--autoencoder_path', type=str, help='the path of trained autoencoder used for online learning')
+    parser.add_argument('--online_level', type=str, choices=['session', 'log'], help='whether online learning is performed on a log sequence (session) or a single line of log (log)')
     parser.add_argument('--online_mode', action='store_true')
+    parser.add_argument('--thresh', type=float, help='the threshold used by autoencoder to determine whether a log sequence is normal')
+    
+    # other general arguments
+    parser.add_argument('--embedding_method', default='context', type=str, choices=['context', 'semantics', 'combined'], help='the chosen embedding layer of UniLog model')
+    parser.add_argument('--lr', default=0.5, type=float)
+    parser.add_argument('--model', default='deeplog', type=str, choices=['deeplog', 'loganomaly', 'unilog'])
+    parser.add_argument('--n_epoch', default=300, type=int)
     parser.add_argument('--optimizer', default='sgd', type=str)
-    parser.add_argument('--partition_method', default='session', type=str)
+    parser.add_argument('--partition_method', default='session', type=str, choices=['session', 'timestamp'])
     parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
-    parser.add_argument('--shuffle', action='store_true')
+    parser.add_argument('--shuffle', action='store_true', help='shuffle before partitioning training and testing dataset, only valid when partition_method is set to timestamp')
     parser.add_argument('--top_k', default=9, type=int)
     parser.add_argument('--train_ratio', default=0.8, type=float)
     parser.add_argument('--unsupervised', action='store_true', help='unsupervised training of specified model')
@@ -87,7 +72,7 @@ if __name__ == '__main__':
             exit(0)
         else:
             embedding_matrix = buildVocab(parsed_log_df, args.pretrain_path)
-                
+            
     # Dataset Preparation
     session_train, session_test = partition(parsed_log_df, 
                                             args.partition_method, 
@@ -115,61 +100,23 @@ if __name__ == '__main__':
     training_uniq_templates = list(eventid_templates.values())
     logger.info(f'{len(training_uniq_templates)} unique templates identified in training data.')
     
-    dataset_train = LogDataset(session_train, 
-                               args.window_size, 
-                               args.step_size, 
-                               num_events)
-    
-    dataset_test = LogDataset(session_test, 
-                              args.window_size, 
-                              args.step_size, 
-                              num_events)
-    
-    logger.info(f'Successfully loaded training dataset, which has {len(dataset_train)} instances.')
-    logger.info(f'Successfully loaded testing dataset, which has {len(dataset_test)} instances.')
-    
-    dataloader_train = DataLoader(dataset_train, 
-                                  collate_fn=collate_fn, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=False, 
-                                  pin_memory=False)
-    
-    dataloader_test = DataLoader(dataset_test, 
-                                 collate_fn=collate_fn, 
-                                 batch_size=args.eval_batch_size, 
-                                 shuffle=False, 
-                                 pin_memory=False)
+    args.embedding_matrix = embedding_matrix
+    args.num_components = num_components
+    args.num_events = num_events
+    args.num_levels = num_levels
+    args.training_tokens_id = training_uniq_templates
     
     if args.model == 'deeplog':
         logger.info(f'Initializing DeepLog model.')
-        model = DeepLog(num_events,
-                        args.num_layers, 
-                        args.hidden_size, 
-                        args.top_k,
-                        args.online_mode).to(device)
+        model = DeepLog(args).to(device)
         
     elif args.model == 'loganomaly':
         logger.info(f'Initializing LogAnomaly model.')
-        model = LogAnomaly(num_events,
-                           args.num_layers, 
-                           args.input_size,
-                           args.hidden_size, 
-                           args.top_k,
-                           args.online_mode,
-                           embedding_matrix,
-                           training_uniq_templates).to(device)
+        model = LogAnomaly(args).to(device)
         
     elif args.model == 'unilog':
         logger.info(f'Initializing UniLog model, embedding_method: {args.embedding_method}.')
-        model = UniLog(num_events,
-                       args.num_layers,
-                       args.input_size,
-                       args.hidden_size,
-                       args.top_k,
-                       args.online_mode,
-                       args.embedding_method,
-                       embedding_matrix,
-                       training_uniq_templates).to(device)
+        model = UniLog(args).to(device)
     else:
         logger.error(f'Fatal error, unrecognised model {args.model}.')
         exit(0)
@@ -182,4 +129,6 @@ if __name__ == '__main__':
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
         
     model.setOptimizer(optimizer)
-    model.fit_evaluate(dataloader_train, dataloader_test, args.n_epoch)
+    model.fit_evaluate(session_train, 
+                       session_test, 
+                       args)
