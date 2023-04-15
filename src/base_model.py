@@ -4,25 +4,54 @@ import time
 import torch
 
 from autoencoder import AutoEncoder
+from dataset import LogDataset
+from torch.utils.data import DataLoader
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+def collate_fn(batch_input_dict):
+    keys = [input_dict['session_key'] for input_dict in batch_input_dict]
+    templates = [input_dict['templates'] for input_dict in batch_input_dict]
+    event_ids = [input_dict['eventids'] for input_dict in batch_input_dict]
+    elapsed_time = [input_dict['elapsedtime'] for input_dict in batch_input_dict]
+    components = [input_dict['components'] for input_dict in batch_input_dict]
+    levels = [input_dict['levels'] for input_dict in batch_input_dict]
+    
+    next_logs = [input_dict['next'] for input_dict in batch_input_dict]
+    anomaly = [input_dict['anomaly'] for input_dict in batch_input_dict]
+    autoencoder_pred = [input_dict['autoencoder_pred'] for input_dict in batch_input_dict]
+
+    return {'session_key': keys,
+            'templates': templates,
+            'eventids': event_ids,
+            'elapsedtime': elapsed_time,
+            'components': components,
+            'levels': levels,
+            'next': next_logs,
+            'anomaly': anomaly,
+            'autoencoder_pred': autoencoder_pred}
+
 class BaseModel(torch.nn.Module):
-    def __init__(self, topk, online_mode=False):
+    def __init__(self, options):
         super(BaseModel, self).__init__()
         self.loss = torch.nn.CrossEntropyLoss()
         self.optim = None
-        self.topk = topk
-        self.online_mode = online_mode
+        self.online_mode = options.online_mode
+        self.online_level = options.online_level
+        self.thresh = options.thresh
+        self.topk = options.top_k
         
         if self.online_mode:
-            self.thresh = 0.02
-            autoencoder = AutoEncoder(9, 6, 11, self.thresh).cuda()
-            autoencoder.load_state_dict(torch.load('./checkpoint/bgl_ae_05_newpartition.pth'))
-            # autoencoder.load_state_dict(torch.load('./checkpoint/hdfs_ae_08_epoch10.pth'))
+            autoencoder = AutoEncoder(options.num_components, 
+                                      options.num_levels, 
+                                      options.window_size+1,
+                                      self.thresh).to('cuda')
+            autoencoder.load_state_dict(torch.load(options.autoencoder_path))
             self.autoencoder = autoencoder.eval()
             self.autoencoder_loss = torch.nn.MSELoss(reduction='none')
+            logger.info(f'Successfully loaded autoencoder params from {options.autoencoder_path}.')
+            logger.info(f'Online learning of {options.online_level} level is applied.')
     
     def evaluate(self, test_loader):
         if self.online_mode:
@@ -32,38 +61,41 @@ class BaseModel(torch.nn.Module):
             model = self.eval()
             
         batch_cnt = 0
-        confident_instances = 0
         total_loss = 0
         session_dict = {}
         loss = torch.nn.CrossEntropyLoss(reduction='none')
         
         for batch in test_loader:
-            pred = model.forward(batch)
-            
             batch_cnt += 1
+            
+            pred = model.forward(batch)
             batch_size, num_classes = pred.shape[0], pred.shape[1]
             
             batch_next_log = [next_log['eventid'] for next_log in batch['next']]
+            # the ranking of the next log is the sum of all candidates with pred score greater than it
             batch_ranking = torch.sum(torch.gt(pred.t(), pred[range(batch_size), batch_next_log]), axis=0)
             batch_ranking_list = batch_ranking.tolist()
-                
+            
             # back-propagation in online mode
             if self.online_mode:
-                batch_embedding, output = self.autoencoder(batch)
-                batch_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
-                weight = torch.lt(batch_loss, self.thresh).to(torch.float)
+                if self.online_level == 'log':
+                    batch_embedding, output = self.autoencoder(batch)
+                    batch_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
+                    weight = torch.lt(batch_loss, self.thresh).to(torch.float)
+                else:
+                    weight = torch.tensor(batch['autoencoder_pred'], dtype=torch.float).to('cuda')
+                    
                 weight_sum = torch.sum(weight).item()
-                confident_instances += weight_sum
-                   
                 label = torch.tensor(batch_next_log).to('cuda')
                 batch_loss = loss(pred, label)
                 batch_loss = torch.matmul(batch_loss, weight) / (weight_sum + 1e-6)
                 total_loss += batch_loss
-                
+
                 self.optim.zero_grad()
                 batch_loss.backward()
-                self.optim.step()       
+                self.optim.step()
 
+            # Aggregate prediction results to sessions
             for ind in range(batch_size):
                 session_key = batch['session_key'][ind]
                 label = batch['anomaly'][ind]
@@ -74,9 +106,7 @@ class BaseModel(torch.nn.Module):
                 
                 for topk in range(self.topk):
                     session_dict[session_key][f'matched_{topk}'] &= (batch_ranking_list[ind] <= topk)
-                    
-        logger.info(f'{confident_instances} instances are used for training in online mode.')
-        
+                            
         TP = [0] * self.topk
         FP = [0] * self.topk
         TON = 0 # total negative
@@ -130,15 +160,77 @@ class BaseModel(torch.nn.Module):
             
         logger.info(f'Training finished. Train loss: {total_loss/batch_cnt :.3f}, time eplased: {time.time()-start: .3f}s.')
         
-    def fit_evaluate(self, train_loader, test_loader, n_epoch):
-        for epoch in range(n_epoch):
+    def buildDataLoader(self, 
+                        session_train, 
+                        session_test, 
+                        options):
+        test_dataset = LogDataset(session_test, 
+                                  options.window_size, 
+                                  options.step_size, 
+                                  options.num_events)
+
+        logger.info(f'Successfully loaded testing dataset, which has {len(test_dataset)} instances.')
+
+        test_loader = DataLoader(test_dataset, 
+                                 collate_fn=collate_fn, 
+                                 batch_size=options.eval_batch_size, 
+                                 shuffle=False, 
+                                 pin_memory=False)
+        
+        if self.online_mode:
+            logger.info('Online mode enabled, apply autoencoder to identify normal instances in testing data.')
+            session_normal = {}
+            
+            for batch in test_loader:
+                batch_size = len(batch['session_key'])
+                batch_embedding, output = self.autoencoder(batch)
+                batch_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
+
+                pred = torch.lt(batch_loss, self.thresh).tolist()
+
+                for ind in range(batch_size):
+                    session_key = batch['session_key'][ind]
+                    if session_key not in session_normal:
+                        session_normal[session_key] = True
+                    session_normal[session_key] &= pred[ind]
+                    
+            normal_sessions = list(filter(lambda key: session_normal[key], session_normal.keys()))
+            logger.info(f'{len(normal_sessions)} normal sessions identified by autoencoder.')
+            
+            for session_key in normal_sessions:
+                session_test[session_key]['autoencoder_pred'] = True
+                
+        train_dataset = LogDataset(session_train, 
+                                   options.window_size, 
+                                   options.step_size, 
+                                   options.num_events)
+
+        logger.info(f'Successfully loaded training dataset, which has {len(train_dataset)} instances.')
+
+        train_loader = DataLoader(train_dataset, 
+                                  collate_fn=collate_fn,
+                                  batch_size=options.batch_size, 
+                                  shuffle=False, 
+                                  pin_memory=False)
+        
+        return train_loader, test_loader
+        
+    def fit_evaluate(self, 
+                     session_train, 
+                     session_test, 
+                     options):
+        train_loader, test_loader = self.buildDataLoader(session_train, 
+                                                         session_test, 
+                                                         options)
+        
+        for epoch in range(options.n_epoch):
             if getattr(self, 'reset_enabled', False):
                 self.resetCandidates()
             
             start = time.time()
             self.fit(train_loader)
             self.evaluate(test_loader)
-            logger.info(f'[{epoch+1}|{n_epoch}] fit_evaluate finished, time elapsed: {time.time()-start: .3f}s. ')
+            logger.info(f'[{epoch+1}|{options.n_epoch}] fit_evaluate finished, time elapsed: {time.time()-start: .3f}s. ')
             
     def setOptimizer(self, optim):
         self.optim = optim

@@ -12,16 +12,11 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 logger = logging.getLogger(__name__)
 
 class DeepLog(BaseModel):
-    def __init__(self, 
-                 num_classes, 
-                 num_layers, 
-                 hidden_size, 
-                 top_k,
-                 online_mode):
-        super(DeepLog, self).__init__(top_k, online_mode)
-        self.EmbeddingLayer = OneHotEmbedding(num_classes+1)
-        self.FC = torch.nn.Linear(hidden_size, num_classes)
-        self.LSTMLayer = torch.nn.LSTM(num_classes+1, hidden_size, num_layers, batch_first=True)
+    def __init__(self, options):
+        super(DeepLog, self).__init__(options)
+        self.EmbeddingLayer = OneHotEmbedding(options.num_classes+1)
+        self.FC = torch.nn.Linear(options.hidden_size, options.num_classes)
+        self.LSTMLayer = torch.nn.LSTM(options.num_classes+1, options.hidden_size, options.num_layers, batch_first=True)
         
     def forward(self, input_dict):
         context_embedding = self.EmbeddingLayer(input_dict)
@@ -29,20 +24,15 @@ class DeepLog(BaseModel):
         return self.FC(hn[-1])
     
 class LogAnomaly(BaseModel):
-    def __init__(self, 
-                 num_classes,
-                 num_layers,
-                 input_size,
-                 hidden_size,
-                 top_k,
-                 online_mode,
-                 pretrain_matrix, 
-                 training_tokens_id):
-        super(LogAnomaly, self).__init__(top_k, online_mode)
-        self.num_classes = num_classes
-        self.EmbeddingLayer = SemanticsNNEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
-        self.FC = torch.nn.Linear(hidden_size, num_classes)
-        self.LSTMLayer = torch.nn.LSTM(300, hidden_size, num_layers, batch_first=True)
+    def __init__(self, options):
+        super(LogAnomaly, self).__init__(options)
+        self.num_classes = options.num_events
+        self.EmbeddingLayer = SemanticsNNEmbedding(options.num_events,
+                                                   options.input_size, 
+                                                   options.embedding_matrix, 
+                                                   options.training_tokens_id)
+        self.FC = torch.nn.Linear(options.hidden_size, options.num_events)
+        self.LSTMLayer = torch.nn.LSTM(300, options.hidden_size, options.num_layers, batch_first=True)
         
     def forward(self, input_dict):
         context_embedding = self.EmbeddingLayer(input_dict)
@@ -50,31 +40,28 @@ class LogAnomaly(BaseModel):
         return self.FC(hn[-1])
     
 class UniLog(BaseModel):
-    def __init__(self, 
-                 num_classes,
-                 num_layers,
-                 input_size, 
-                 hidden_size,
-                 top_k,
-                 online_mode,
-                 embedding_method,
-                 pretrain_matrix, 
-                 training_tokens_id):
-        super(UniLog, self).__init__(top_k, online_mode)
+    def __init__(self, options):
+        super(UniLog, self).__init__(options)
+        input_size = options.input_size
+        hidden_size = options.hidden_size
+        num_classes = options.num_events
         
-        if embedding_method == 'context':
-            self.EmbeddingLayer = ContextEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
-        elif embedding_method == 'semantics':
+        if options.embedding_method == 'context':
+            self.EmbeddingLayer = ContextEmbedding(num_classes, input_size)
+        elif options.embedding_method == 'semantics':
             input_size = 300
             hidden_size = 300
-            self.EmbeddingLayer = SemanticsEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
-        elif embedding_method == 'combined':
-            self.EmbeddingLayer = CombinedEmbedding(num_classes, input_size, pretrain_matrix, training_tokens_id)
+            self.EmbeddingLayer = SemanticsEmbedding(num_classes, options.embedding_matrix, options.training_tokens_id)
+        elif options.embedding_method == 'combined':
+            self.EmbeddingLayer = CombinedEmbedding(num_classes, 
+                                                    input_size, 
+                                                    options.embedding_matrix, 
+                                                    options.training_tokens_id)
         else:
-            logger.error(f'Fatal error, unrecognised embedding method {embedding_method} for UniLog model.')
+            logger.error(f'Fatal error, unrecognised embedding method {options.embedding_method} for UniLog model.')
             exit(0)
             
-        self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, options.num_layers, batch_first=True)
         self.num_candidates = 0
         self.num_classes = num_classes
         self.num_embeddings = num_classes + 1
@@ -121,73 +108,4 @@ class UniLog(BaseModel):
         
     def setOptimizer(self, optim):
         self.EmbeddingLayer.setOptimizer(optim)
-        self.optim = optim        
-
-class UniLogNet(BaseModel):
-    def __init__(self, 
-                 num_layers,
-                 input_size, 
-                 hidden_size,
-                 top_k):
-        super(UniLogNet, self).__init__(top_k)
-        self.EmbeddingLayer = EmbeddingLayer(input_size)
-        self.LSTMLayer = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.key2label = {}
-        self.candidates = []
-        
-    def resetCandidates(self):
-        self.candidates.clear()
-        self.key2label.clear()
-        
-    def getEmbeddings(self, log_key_templates):
-        '''
-        Return a 2D tensor, each row of which represents the embedding of
-        the corresponding log_key in log_keys.
-        
-        @params log_key_templates: a list of {'key': log_key, 'template': log_template}
-        '''
-        return torch.stack([self.EmbeddingLayer(key_template) for key_template in log_key_templates])
-        
-    def forward(self, batch_context_logs):
-        '''
-        batch_context_logs: A list of context_logs
-        '''
-        labels = []
-        batch_candidates_embeddings = []
-        num_candidates = []
-        
-        # For each batch, update the candidates seen by the model by
-        # going through the context logs of the first instance.
-        for entry in batch_context_logs[0][:-1]:
-            key, template = entry.get('key'), entry.get('template')
-            self.updateCandidates(key, template)
-        
-        # For the remaining instances, only the 'next log' is used
-        # to update the candidates ( when step_size is set to 1).
-        for batch in batch_context_logs:
-            key, template = batch[-1].get('key'), batch[-1].get('template')
-            self.updateCandidates(key, template)
-            labels.append(self.key2label[key])
-            batch_candidates_embeddings.append(self.getEmbeddings(self.candidates))
-            num_candidates.append(len(self.candidates))
-
-        candidates_embeddings = torch.nn.utils.rnn.pad_sequence(batch_candidates_embeddings, batch_first=True, padding_value=0.0)
-        context_embeddings = torch.stack([self.getEmbeddings(context_logs[:-1]) for context_logs in batch_context_logs])
-        labels = torch.tensor(labels, dtype=torch.int64).cuda()
-        
-        output, (hn, cn) = self.LSTMLayer(context_embeddings)
-        hn = torch.unsqueeze(hn[-1], dim=2)
-        pred = torch.squeeze(torch.bmm(candidates_embeddings, hn), dim=2)
-        
-        for ind, n_candidate in enumerate(num_candidates):
-            pred[ind, n_candidate:] = float('-inf')
-                    
-        return pred, labels
-    
-    def updateCandidates(self, key, template):
-        if key not in self.key2label:
-            self.key2label[key] = len(self.key2label)
-            self.candidates.append({'key': key, 'template': template})
-        else:
-            label = self.key2label[key]
-            self.candidates[label] = {'key': key, 'template': template}
+        self.optim = optim

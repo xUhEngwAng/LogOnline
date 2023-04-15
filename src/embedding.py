@@ -29,7 +29,7 @@ class AutoEncoderEmbedding(torch.nn.Module):
         return torch.cat([time_elapsed, components_embedding, levels_embedding], dim=2)
                              
 class ContextEmbedding(torch.nn.Module):
-    def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
+    def __init__(self, num_classes, n_dim):
         
         '''
         Attributes
@@ -100,7 +100,7 @@ class OneHotEmbedding(torch.nn.Module):
         return self.embedding_layer(batch_event_ids.cuda())
     
 class SemanticsEmbedding(torch.nn.Module):
-    def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
+    def __init__(self, num_classes, pretrain_matrix, training_tokens_id):
         super(SemanticsEmbedding, self).__init__()
         self.word_embedder = torch.nn.Embedding.from_pretrained(pretrain_matrix, freeze=True).cuda()
         assert(num_classes == len(training_tokens_id))
@@ -187,9 +187,9 @@ class SemanticsNNEmbedding(torch.nn.Module):
 class CombinedEmbedding(torch.nn.Module):
     def __init__(self, num_classes, n_dim, pretrain_matrix, training_tokens_id):
         super(CombinedEmbedding, self).__init__()
-        self.context_embedder = ContextEmbedding(num_classes, n_dim, pretrain_matrix, training_tokens_id)  
+        self.context_embedder = ContextEmbedding(num_classes, n_dim)  
         self.semantics_embedder = torch.nn.Sequential(
-            SemanticsEmbedding(num_classes, n_dim, pretrain_matrix, training_tokens_id),
+            SemanticsEmbedding(num_classes, pretrain_matrix, training_tokens_id),
             torch.nn.Linear(300, n_dim),
             torch.nn.ReLU()
         )
