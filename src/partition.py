@@ -68,9 +68,9 @@ def partitionByOrderShuffle(log_df, session_size, train_ratio):
     
     for key, session in session_total.items():
         if np.random.random() < train_ratio:
-            session_train[key] = group
+            session_train[key] = session
         else:
-            session_test[key] = group
+            session_test[key] = session
             
     return session_train, session_test
 
