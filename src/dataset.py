@@ -59,6 +59,7 @@ class LogDataset(Dataset):
         end = start + self.window_size + 1
         
         session_key = session['key']
+        autoencoder_pred = session.get('autoencoder_pred', False)
         elapsed_time = self.pad(session['elapsedtime'][start: end], self.window_size+1, -1)
         components = self.pad(session['components'][start: end], self.window_size+1, self.padding_idx)
         templates = self.pad(session['templates'][start: end], self.window_size+1, self.padding_idx)
@@ -77,4 +78,5 @@ class LogDataset(Dataset):
                 'levels': levels,
                 'elapsedtime': elapsed_time,
                 'next': next_log,
-                'anomaly': anomaly}
+                'anomaly': anomaly,
+                'autoencoder_pred': autoencoder_pred}
