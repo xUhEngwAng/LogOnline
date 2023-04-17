@@ -28,7 +28,7 @@ def extractFeatures(session_train, session_test=None, unsupervised=False):
             mean, stddev = None, None
             
         _extractFeatures(session_test, False, uniq_components, uniq_events, uniq_levels, mean, stddev)
-        logger.info(f'{len(uniq_components)} components, {len(uniq_events)} evnets and {len(uniq_levels)} levels are extracted in whole data.')
+        logger.info(f'{len(uniq_components)} components, {len(uniq_events)} events and {len(uniq_levels)} levels are extracted in whole data.')
     
     return num_components, num_events, num_levels, uniq_events
 

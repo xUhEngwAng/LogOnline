@@ -80,8 +80,8 @@ class BaseModel(torch.nn.Module):
             if self.online_mode:
                 if self.online_level == 'log':
                     batch_embedding, output = self.autoencoder(batch)
-                    batch_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
-                    weight = torch.lt(batch_loss, self.thresh).to(torch.float)
+                    autoencoder_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
+                    weight = torch.lt(autoencoder_loss, self.thresh).to(torch.float)
                 else:
                     weight = torch.tensor(batch['autoencoder_pred'], dtype=torch.float).to('cuda')
                     
@@ -201,7 +201,7 @@ class BaseModel(torch.nn.Module):
                 session_test[session_key]['autoencoder_pred'] = True
                 
         train_dataset = LogDataset(session_train, 
-                                   options.window_size, 
+                                   options.window_size,
                                    options.step_size, 
                                    options.num_events)
 

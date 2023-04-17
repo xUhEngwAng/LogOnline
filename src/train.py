@@ -108,12 +108,10 @@ if __name__ == '__main__':
     
     if args.model == 'deeplog':
         logger.info(f'Initializing DeepLog model.')
-        model = DeepLog(args).to(device)
-        
+        model = DeepLog(args).to(device)  
     elif args.model == 'loganomaly':
         logger.info(f'Initializing LogAnomaly model.')
         model = LogAnomaly(args).to(device)
-        
     elif args.model == 'unilog':
         logger.info(f'Initializing UniLog model, embedding_method: {args.embedding_method}.')
         model = UniLog(args).to(device)
