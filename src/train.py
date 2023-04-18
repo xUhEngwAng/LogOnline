@@ -42,7 +42,8 @@ if __name__ == '__main__':
     parser.add_argument('--partition_method', default='session', type=str, choices=['session', 'timestamp'])
     parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
     parser.add_argument('--shuffle', action='store_true', help='shuffle before partitioning training and testing dataset, only valid when partition_method is set to timestamp')
-    parser.add_argument('--top_k', default=9, type=int)
+    parser.add_argument('--min_topk', default=0, type=int, help='only display the anomaly detection result in [min_topk, topk]')
+    parser.add_argument('--topk', default=9, type=int)
     parser.add_argument('--train_ratio', default=0.8, type=float)
     parser.add_argument('--unsupervised', action='store_true', help='unsupervised training of specified model')
     
@@ -119,7 +120,7 @@ if __name__ == '__main__':
         logger.error(f'Fatal error, unrecognised model {args.model}.')
         exit(0)
         
-    logger.info(f'num_classes: {num_events}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.top_k}, optimizer: {args.optimizer}, lr: {args.lr}, train_ratio: {args.train_ratio}, window_size: {args.window_size}.')
+    logger.info(f'num_classes: {num_events}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.topk}, optimizer: {args.optimizer}, lr: {args.lr}, train_ratio: {args.train_ratio}, window_size: {args.window_size}.')
 
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)

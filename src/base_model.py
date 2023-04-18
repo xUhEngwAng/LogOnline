@@ -40,7 +40,8 @@ class BaseModel(torch.nn.Module):
         self.online_mode = options.online_mode
         self.online_level = options.online_level
         self.thresh = options.thresh
-        self.topk = options.top_k
+        self.min_topk = options.min_topk
+        self.topk = options.topk
         
         if self.online_mode:
             autoencoder = AutoEncoder(options.num_components, 
@@ -100,34 +101,34 @@ class BaseModel(torch.nn.Module):
                 session_key = batch['session_key'][ind]
                 label = batch['anomaly'][ind]
                 if session_key not in session_dict:
-                    session_dict[session_key] = {f'matched_{topk}': True for topk in range(self.topk)}
+                    session_dict[session_key] = {f'matched_{topk}': True for topk in range(self.min_topk, self.topk)}
                     session_dict[session_key]['anomaly'] = False
                 session_dict[session_key]['anomaly'] |= label
                 
-                for topk in range(self.topk):
+                for topk in range(self.min_topk, self.topk):
                     session_dict[session_key][f'matched_{topk}'] &= (batch_ranking_list[ind] <= topk)
                             
-        TP = [0] * self.topk
-        FP = [0] * self.topk
+        TP = [0] * (self.topk - self.min_topk)
+        FP = [0] * (self.topk - self.min_topk)
         TON = 0 # total negative
         TOP = 0 # total positive
         
         for key, session_info in session_dict.items():
             if session_info['anomaly']:
                 TOP += 1
-                for topk in range(self.topk):
+                for topk in range(self.min_topk, self.topk):
                     if not session_info[f'matched_{topk}']:
-                        TP[topk] += 1
+                        TP[topk-self.min_topk] += 1
             else:
                 TON += 1
-                for topk in range(self.topk):
+                for topk in range(self.min_topk, self.topk):
                     if not session_info[f'matched_{topk}']:
-                        FP[topk] += 1
+                        FP[topk-self.min_topk] += 1
                     
         logger.info(f'Evaluation finished. TOP: {TOP}, TON: {TON}, total_loss: {total_loss/batch_cnt :.3f}.')
-        FN = [TOP - TP[topk] for topk in range(self.topk)]
+        FN = [TOP - TP[topk] for topk in range(self.topk-self.min_topk)]
         
-        for topk in range(self.topk):
+        for topk in range(self.topk-self.min_topk):
             if TP[topk] + FN[topk] == 0:
                 precision = np.NAN
             else:
@@ -139,7 +140,7 @@ class BaseModel(torch.nn.Module):
                 recall = TP[topk] / TOP
 
             F1 = 2 * precision * recall / (precision + recall)
-            logger.info(f'[topk={topk+1}] FP: {FP[topk]}, FN: {FN[topk]}, Precision: {precision: .3f}, Recall: {recall :.3f}, F1-measure: {F1: .3f}.')
+            logger.info(f'[topk={self.min_topk+topk+1}] FP: {FP[topk]}, FN: {FN[topk]}, Precision: {precision: .3f}, Recall: {recall :.3f}, F1-measure: {F1: .3f}.')
     
     def fit(self, train_loader):
         batch_cnt = 0
