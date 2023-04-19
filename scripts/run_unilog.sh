@@ -1,9 +1,9 @@
 # user-defined parameters
 dataset=Spirit
-device_number=0
+device_number=1
 model=unilog
 embedding_method=combined
-thresh=0.0030
+thresh=0.0031
 train_ratio=8
 online_mode=True
 
@@ -16,16 +16,18 @@ shuffle=False
 # computed parameters
 path=./data/$dataset/$dataset.log\_structured.csv
 # autoencoder_path=./checkpoint/${dataset,,}\_ae\_0${train_ratio}_newpartition.pth
-autoencoder_path=./checkpoint/newpartition/${dataset,,}\_ae\_0${train_ratio}_epoch1.pth
-logging_file=$model\_$embedding_method\
+autoencoder_path=./checkpoint/newpartition/${dataset,,}\_ae\_0${train_ratio}_epoch8.pth
+model_details=$model\_$embedding_method
 
 if [ $online_mode = True ]; then
-    logging_file+=\_online
+    model_details+=\_online
 fi
 
 if [ $shuffle = True ]; then
-    logging_file+=\_shuffle
+    model_details+=\_shuffle
 fi
+
+model_save_path=./checkpoint/${dataset,,}\_0${train_ratio}/$model_details.pth
 
 if [ $dataset = HDFS ]; then
     n_epoch=80
@@ -40,10 +42,11 @@ else
     partition_method=timestamp
     
     if [ $dataset = BGL ]; then
-        topk=150
+        min_topk=50
+        topk=200
     else
-        min_topk=100
-        topk=250
+        min_topk=180
+        topk=330
     fi
 fi
 
@@ -52,6 +55,7 @@ nohup python ./src/train.py $path \
 --autoencoder_path $autoencoder_path \
 --embedding_method $embedding_method \
 --model $model \
+--model_save_path $model_save_path \
 --min_topk $min_topk \
 --n_epoch $n_epoch \
 --online_level $online_level \
@@ -62,4 +66,4 @@ nohup python ./src/train.py $path \
 --topk $topk \
 --train_ratio 0.$train_ratio \
 --window_size $window_size \
->> ./log/$logging_path/$logging_file\_30.log 2>&1 &
+>> ./log/$logging_path/$model_details\_31.log 2>&1 &

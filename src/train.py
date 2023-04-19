@@ -36,7 +36,8 @@ if __name__ == '__main__':
     # other general arguments
     parser.add_argument('--embedding_method', default='context', type=str, choices=['context', 'semantics', 'combined'], help='the chosen embedding layer of UniLog model')
     parser.add_argument('--lr', default=0.5, type=float)
-    parser.add_argument('--model', default='deeplog', type=str, choices=['deeplog', 'loganomaly', 'unilog'])
+    parser.add_argument('--model', default='unilog', type=str, choices=['deeplog', 'loganomaly', 'unilog'])
+    parser.add_argument('--model_save_path', type=str)
     parser.add_argument('--n_epoch', default=300, type=int)
     parser.add_argument('--optimizer', default='sgd', type=str)
     parser.add_argument('--partition_method', default='session', type=str, choices=['session', 'timestamp'])

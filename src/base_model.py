@@ -1,5 +1,6 @@
 import logging
 import numpy as np
+import os
 import time
 import torch
 
@@ -41,6 +42,7 @@ class BaseModel(torch.nn.Module):
         self.online_level = options.online_level
         self.thresh = options.thresh
         self.min_topk = options.min_topk
+        self.model_save_path = options.model_save_path
         self.topk = options.topk
         
         if self.online_mode:
@@ -53,7 +55,7 @@ class BaseModel(torch.nn.Module):
             self.autoencoder_loss = torch.nn.MSELoss(reduction='none')
             logger.info(f'Successfully loaded autoencoder params from {options.autoencoder_path}.')
             logger.info(f'Online learning of {options.online_level} level is applied.')
-    
+            
     def evaluate(self, test_loader):
         if self.online_mode:
             logger.info('Online mode enabled, model would get updated during evaluation.')
@@ -127,6 +129,7 @@ class BaseModel(torch.nn.Module):
                     
         logger.info(f'Evaluation finished. TOP: {TOP}, TON: {TON}, total_loss: {total_loss/batch_cnt :.3f}.')
         FN = [TOP - TP[topk] for topk in range(self.topk-self.min_topk)]
+        best_result, best_topk = 0, 0
         
         for topk in range(self.topk-self.min_topk):
             if TP[topk] + FN[topk] == 0:
@@ -141,6 +144,15 @@ class BaseModel(torch.nn.Module):
 
             F1 = 2 * precision * recall / (precision + recall)
             logger.info(f'[topk={self.min_topk+topk+1}] FP: {FP[topk]}, FN: {FN[topk]}, Precision: {precision: .3f}, Recall: {recall :.3f}, F1-measure: {F1: .3f}.')
+            
+            if best_result < F1:
+                best_result = F1
+                best_topk = topk
+        
+        return {'topk': self.min_topk+best_topk+1, 
+                'precision': TP[best_topk]/(TP[best_topk]+FP[best_topk]), 
+                'recall': TP[best_topk]/TOP, 
+                'F1': best_result}
     
     def fit(self, train_loader):
         batch_cnt = 0
@@ -223,6 +235,7 @@ class BaseModel(torch.nn.Module):
         train_loader, test_loader = self.buildDataLoader(session_train, 
                                                          session_test, 
                                                          options)
+        best_result = {'F1': 0}
         
         for epoch in range(options.n_epoch):
             if getattr(self, 'reset_enabled', False):
@@ -230,8 +243,17 @@ class BaseModel(torch.nn.Module):
             
             start = time.time()
             self.fit(train_loader)
-            self.evaluate(test_loader)
-            logger.info(f'[{epoch+1}|{options.n_epoch}] fit_evaluate finished, time elapsed: {time.time()-start: .3f}s. ')
+            result_dict = self.evaluate(test_loader)
+            
+            if best_result['F1'] < result_dict['F1']:
+                best_result = result_dict
+                best_result['epoch'] = epoch+1
+                torch.save(self.state_dict(), self.model_save_path)
+            
+            logger.info(f'[{epoch+1}|{options.n_epoch}] fit_evaluate finished, time elapsed: {time.time()-start: .3f}s.')
+            
+        logger.info(f"fit_evaluate finished, best result obtained at epoch {best_result['epoch']} with topk = {best_result['topk']}. Precision: {best_result['precision']: .3f}, Recall: {best_result['recall'] :.3f}, F1-measure: {best_result['F1']: .3f}.")
+        logger.info(f'Best model saved to {self.model_save_path}.')
             
     def setOptimizer(self, optim):
         self.optim = optim
