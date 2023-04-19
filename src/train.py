@@ -36,13 +36,15 @@ if __name__ == '__main__':
     # other general arguments
     parser.add_argument('--embedding_method', default='context', type=str, choices=['context', 'semantics', 'combined'], help='the chosen embedding layer of UniLog model')
     parser.add_argument('--lr', default=0.5, type=float)
-    parser.add_argument('--model', default='deeplog', type=str, choices=['deeplog', 'loganomaly', 'unilog'])
+    parser.add_argument('--model', default='unilog', type=str, choices=['deeplog', 'loganomaly', 'unilog'])
+    parser.add_argument('--model_save_path', type=str)
     parser.add_argument('--n_epoch', default=300, type=int)
     parser.add_argument('--optimizer', default='sgd', type=str)
     parser.add_argument('--partition_method', default='session', type=str, choices=['session', 'timestamp'])
     parser.add_argument('--pretrain_path', default='./data/wiki-news-300d-1M.vec', type=str, help='path of pretrained word embeddings')
     parser.add_argument('--shuffle', action='store_true', help='shuffle before partitioning training and testing dataset, only valid when partition_method is set to timestamp')
-    parser.add_argument('--top_k', default=9, type=int)
+    parser.add_argument('--min_topk', default=0, type=int, help='only display the anomaly detection result in [min_topk, topk]')
+    parser.add_argument('--topk', default=9, type=int)
     parser.add_argument('--train_ratio', default=0.8, type=float)
     parser.add_argument('--unsupervised', action='store_true', help='unsupervised training of specified model')
     
@@ -108,12 +110,10 @@ if __name__ == '__main__':
     
     if args.model == 'deeplog':
         logger.info(f'Initializing DeepLog model.')
-        model = DeepLog(args).to(device)
-        
+        model = DeepLog(args).to(device)  
     elif args.model == 'loganomaly':
         logger.info(f'Initializing LogAnomaly model.')
         model = LogAnomaly(args).to(device)
-        
     elif args.model == 'unilog':
         logger.info(f'Initializing UniLog model, embedding_method: {args.embedding_method}.')
         model = UniLog(args).to(device)
@@ -121,7 +121,7 @@ if __name__ == '__main__':
         logger.error(f'Fatal error, unrecognised model {args.model}.')
         exit(0)
         
-    logger.info(f'num_classes: {num_events}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.top_k}, optimizer: {args.optimizer}, lr: {args.lr}, train_ratio: {args.train_ratio}, window_size: {args.window_size}.')
+    logger.info(f'num_classes: {num_events}, num_layers: {args.num_layers}, input_size: {args.input_size}, hidden_size: {args.hidden_size}, topk: {args.topk}, optimizer: {args.optimizer}, lr: {args.lr}, train_ratio: {args.train_ratio}, window_size: {args.window_size}.')
 
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)

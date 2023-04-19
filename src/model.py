@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 class DeepLog(BaseModel):
     def __init__(self, options):
         super(DeepLog, self).__init__(options)
-        self.EmbeddingLayer = OneHotEmbedding(options.num_classes+1)
-        self.FC = torch.nn.Linear(options.hidden_size, options.num_classes)
-        self.LSTMLayer = torch.nn.LSTM(options.num_classes+1, options.hidden_size, options.num_layers, batch_first=True)
+        self.EmbeddingLayer = OneHotEmbedding(options.num_events+1)
+        self.FC = torch.nn.Linear(options.hidden_size, options.num_events)
+        self.LSTMLayer = torch.nn.LSTM(options.num_events+1, options.hidden_size, options.num_layers, batch_first=True)
         
     def forward(self, input_dict):
         context_embedding = self.EmbeddingLayer(input_dict)
