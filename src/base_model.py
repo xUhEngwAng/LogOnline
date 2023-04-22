@@ -56,127 +56,7 @@ class BaseModel(torch.nn.Module):
             logger.info(f'Successfully loaded autoencoder params from {options.autoencoder_path}.')
             logger.info(f'Online learning of {options.online_level} level is applied.')
             
-    def evaluate(self, test_loader):
-        if self.online_mode:
-            logger.info('Online mode enabled, model would get updated during evaluation.')
-            model = self.train()
-        else:
-            model = self.eval()
-            
-        batch_cnt = 0
-        total_loss = 0
-        session_dict = {}
-        loss = torch.nn.CrossEntropyLoss(reduction='none')
-        
-        for batch in test_loader:
-            batch_cnt += 1
-            
-            pred = model.forward(batch)
-            batch_size, num_classes = pred.shape[0], pred.shape[1]
-            
-            batch_next_log = [next_log['eventid'] for next_log in batch['next']]
-            # the ranking of the next log is the sum of all candidates with pred score greater than it
-            batch_ranking = torch.sum(torch.gt(pred.t(), pred[range(batch_size), batch_next_log]), axis=0)
-            batch_ranking_list = batch_ranking.tolist()
-            
-            # back-propagation in online mode
-            if self.online_mode:
-                if self.online_level == 'log':
-                    batch_embedding, output = self.autoencoder(batch)
-                    autoencoder_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
-                    weight = torch.lt(autoencoder_loss, self.thresh).to(torch.float)
-                else:
-                    weight = torch.tensor(batch['autoencoder_pred'], dtype=torch.float).to('cuda')
-                    
-                weight_sum = torch.sum(weight).item()
-                label = torch.tensor(batch_next_log).to('cuda')
-                batch_loss = loss(pred, label)
-                batch_loss = torch.matmul(batch_loss, weight) / (weight_sum + 1e-6)
-                total_loss += batch_loss
-
-                self.optim.zero_grad()
-                batch_loss.backward()
-                self.optim.step()
-
-            # Aggregate prediction results to sessions
-            for ind in range(batch_size):
-                session_key = batch['session_key'][ind]
-                label = batch['anomaly'][ind]
-                if session_key not in session_dict:
-                    session_dict[session_key] = {f'matched_{topk}': True for topk in range(self.min_topk, self.topk)}
-                    session_dict[session_key]['anomaly'] = False
-                session_dict[session_key]['anomaly'] |= label
-                
-                for topk in range(self.min_topk, self.topk):
-                    session_dict[session_key][f'matched_{topk}'] &= (batch_ranking_list[ind] <= topk)
-                            
-        TP = [0] * (self.topk - self.min_topk)
-        FP = [0] * (self.topk - self.min_topk)
-        TON = 0 # total negative
-        TOP = 0 # total positive
-        
-        for key, session_info in session_dict.items():
-            if session_info['anomaly']:
-                TOP += 1
-                for topk in range(self.min_topk, self.topk):
-                    if not session_info[f'matched_{topk}']:
-                        TP[topk-self.min_topk] += 1
-            else:
-                TON += 1
-                for topk in range(self.min_topk, self.topk):
-                    if not session_info[f'matched_{topk}']:
-                        FP[topk-self.min_topk] += 1
-                    
-        logger.info(f'Evaluation finished. TOP: {TOP}, TON: {TON}, total_loss: {total_loss/batch_cnt :.3f}.')
-        FN = [TOP - TP[topk] for topk in range(self.topk-self.min_topk)]
-        best_result, best_topk = 0, 0
-        
-        for topk in range(self.topk-self.min_topk):
-            if TP[topk] + FN[topk] == 0:
-                precision = np.NAN
-            else:
-                precision = TP[topk] / (TP[topk] + FP[topk])
-
-            if TOP == 0:
-                recall = np.NAN
-            else:
-                recall = TP[topk] / TOP
-
-            F1 = 2 * precision * recall / (precision + recall)
-            logger.info(f'[topk={self.min_topk+topk+1}] FP: {FP[topk]}, FN: {FN[topk]}, Precision: {precision: .3f}, Recall: {recall :.3f}, F1-measure: {F1: .3f}.')
-            
-            if best_result < F1:
-                best_result = F1
-                best_topk = topk
-        
-        return {'topk': self.min_topk+best_topk+1, 
-                'precision': TP[best_topk]/(TP[best_topk]+FP[best_topk]), 
-                'recall': TP[best_topk]/TOP, 
-                'F1': best_result}
-    
-    def fit(self, train_loader):
-        batch_cnt = 0
-        total_loss = 0
-        model = self.train()
-        start = time.time()
-        
-        for batch in train_loader:
-            batch_cnt += 1
-            self.optim.zero_grad()
-            pred = model.forward(batch)
-            label = torch.tensor([next_log['eventid'] for next_log in batch['next']]).to('cuda')
-            
-            batch_loss = self.loss(pred, label)
-            batch_loss.backward()
-            total_loss += batch_loss
-            self.optim.step()
-            
-        logger.info(f'Training finished. Train loss: {total_loss/batch_cnt :.3f}, time eplased: {time.time()-start: .3f}s.')
-        
-    def buildDataLoader(self, 
-                        session_train, 
-                        session_test, 
-                        options):
+    def buildDataLoader(self, session_train, session_test, options):
         test_dataset = LogDataset(session_test, 
                                   options.window_size, 
                                   options.step_size, 
@@ -184,10 +64,10 @@ class BaseModel(torch.nn.Module):
 
         logger.info(f'Successfully loaded testing dataset, which has {len(test_dataset)} instances.')
 
-        test_loader = DataLoader(test_dataset, 
-                                 collate_fn=collate_fn, 
-                                 batch_size=options.eval_batch_size, 
-                                 shuffle=False, 
+        test_loader = DataLoader(test_dataset,
+                                 collate_fn=collate_fn,
+                                 batch_size=options.eval_batch_size,
+                                 shuffle=False,
                                  pin_memory=False)
         
         if self.online_mode:
@@ -227,14 +107,152 @@ class BaseModel(torch.nn.Module):
                                   pin_memory=False)
         
         return train_loader, test_loader
+            
+    def evaluate(self, test_loader):
+        if self.online_mode:
+            logger.info('Online mode enabled, model would get updated during evaluation.')
+            model = self.train()
+        else:
+            model = self.eval()
+            
+        min_topk = self.min_topk
+        max_topk = self.topk
+            
+        batch_cnt = 0
+        total_loss = 0
+        best_result, session_dict = {'F1': 0}, {}
+        loss = torch.nn.CrossEntropyLoss(reduction='none')
+        
+        for batch in test_loader:
+            batch_cnt += 1
+            
+            pred = model.forward(batch)
+            batch_size, num_classes = pred.shape[0], pred.shape[1]
+            
+            batch_next_log = [next_log['eventid'] for next_log in batch['next']]
+            # the ranking of the next log is the sum of all candidates with pred score greater than it
+            batch_ranking = torch.sum(torch.gt(pred.t(), pred[range(batch_size), batch_next_log]), axis=0)
+            batch_ranking_list = batch_ranking.tolist()
+            
+            # back-propagation in online mode
+            if self.online_mode:
+                if self.online_level == 'log':
+                    batch_embedding, output = self.autoencoder(batch)
+                    autoencoder_loss = self.autoencoder_loss(output, batch_embedding).mean(axis=1)
+                    weight = torch.lt(autoencoder_loss, self.thresh).to(torch.float)
+                else:
+                    weight = torch.tensor(batch['autoencoder_pred'], dtype=torch.float).to('cuda')
+                    
+                weight_sum = torch.sum(weight).item()
+                label = torch.tensor(batch_next_log).to('cuda')
+                batch_loss = loss(pred, label)
+                batch_loss = torch.matmul(batch_loss, weight) / (weight_sum + 1e-6)
+                total_loss += batch_loss
+
+                self.optim.zero_grad()
+                batch_loss.backward()
+                self.optim.step()
+
+            # Aggregate prediction results to sessions
+            for ind in range(batch_size):
+                session_key = batch['session_key'][ind]
+                label = batch['anomaly'][ind]
+                if session_key not in session_dict:
+                    session_dict[session_key] = {f'matched_{topk}': True for topk in range(min_topk, max_topk)}
+                    session_dict[session_key]['anomaly'] = False
+                session_dict[session_key]['anomaly'] |= label
+                
+                for topk in range(min_topk, max_topk):
+                    session_dict[session_key][f'matched_{topk}'] &= (batch_ranking_list[ind] <= topk)
+                
+        for topk in range(min_topk, max_topk):
+            result_dict = self._evaluateF1(session_dict, topk, 1)[-1]
+            
+            if best_result['F1'] < result_dict['F1']:
+                best_result = result_dict
+                best_result['topk'] = topk
+        
+        logger.info(f"[topk={best_result['topk']}] TOP: {best_result['TOP']}, TON: {best_result['TON']}, FP: {best_result['FP']}, FN: {best_result['FN']}, Precision: {best_result['precision']: .3f}, Recall: {best_result['recall'] :.3f}, F1-measure: {best_result['F1']: .3f}.")
+        
+        robustness_result = self._evaluateF1(session_dict, best_result['topk'], 5)
+        
+        for ind, result_dict in enumerate(robustness_result):
+            logger.info(f"[{ind+1}|5] TOP: {result_dict['TOP']}, TON: {result_dict['TON']}, FP: {result_dict['FP']}, FN: {result_dict['FN']}, Precision: {result_dict['precision']: .3f}, Recall: {result_dict['recall'] :.3f}, F1-measure: {result_dict['F1']: .3f}.")
+        
+        return best_result
+    
+    def _evaluateF1(self, session_dict, topk, num_slices=1):
+        '''
+        Evaluate the F1 score of anomaly detection result stored in `session_dict`.
+        The sessions are averaged to `num_slices` slices, with the result of each
+        slice returned.
+        '''
+        TP = [0] * num_slices
+        FP = [0] * num_slices
+        TON = [0] * num_slices  # total negative
+        TOP = [0] * num_slices  # total positive
+        
+        slice_size = int(np.ceil(len(session_dict) / num_slices))
+        slices = list(range(0, len(session_dict), slice_size))
+        slices.append(len(session_dict))    
+        curr_ind = 0
+        result = []
+        
+        for ind, (key, session_info) in enumerate(session_dict.items()):
+            if slices[curr_ind + 1] < ind:
+                curr_ind += 1
+                
+            if session_info['anomaly']:
+                TOP[curr_ind] += 1
+                if not session_info[f'matched_{topk}']:
+                    TP[curr_ind] += 1
+            else:
+                TON[curr_ind] += 1
+                if not session_info[f'matched_{topk}']:
+                    FP[curr_ind] += 1
+                    
+        FN = [TOP[slice_ind] - TP[slice_ind] for slice_ind in range(num_slices)]
+        
+        for slice_ind in range(num_slices):
+            if TP[slice_ind] + FP[slice_ind] == 0:
+                precision = np.NAN
+            else:
+                precision = TP[slice_ind] / (TP[slice_ind] + FP[slice_ind])
+
+            if TOP[slice_ind] == 0:
+                recall = np.NAN
+            else:
+                recall = TP[slice_ind] / TOP[slice_ind]
+
+            F1 = 2 * precision * recall / (precision + recall)
+            result.append({'TOP': TOP[slice_ind], 'TON': TON[slice_ind], 'FP': FP[slice_ind], 'FN': FN[slice_ind], 'precision': precision, 'recall': recall, 'F1': F1})
+            
+        return result
+    
+    def fit(self, train_loader):
+        batch_cnt = 0
+        total_loss = 0
+        model = self.train()
+        start = time.time()
+        
+        for batch in train_loader:
+            batch_cnt += 1
+            self.optim.zero_grad()
+            pred = model.forward(batch)
+            label = torch.tensor([next_log['eventid'] for next_log in batch['next']]).to('cuda')
+            
+            batch_loss = self.loss(pred, label)
+            batch_loss.backward()
+            total_loss += batch_loss
+            self.optim.step()
+            
+        logger.info(f'Training finished. Train loss: {total_loss/batch_cnt :.3f}, time eplased: {time.time()-start: .3f}s.')
         
     def fit_evaluate(self, 
                      session_train, 
                      session_test, 
                      options):
-        train_loader, test_loader = self.buildDataLoader(session_train, 
-                                                         session_test, 
-                                                         options)
+        train_loader, test_loader = self.buildDataLoader(session_train, session_test, options)
         best_result = {'F1': 0}
         
         for epoch in range(options.n_epoch):
@@ -248,7 +266,7 @@ class BaseModel(torch.nn.Module):
             if best_result['F1'] < result_dict['F1']:
                 best_result = result_dict
                 best_result['epoch'] = epoch+1
-                torch.save(self.state_dict(), self.model_save_path)
+                torch.save(self, self.model_save_path)
             
             logger.info(f'[{epoch+1}|{options.n_epoch}] fit_evaluate finished, time elapsed: {time.time()-start: .3f}s.')
             
