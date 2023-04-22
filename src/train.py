@@ -3,11 +3,9 @@ import logging
 import pandas as pd
 import torch
 
-from dataset import LogDataset
 from feature import extractFeatures
 from model import DeepLog, LogAnomaly, UniLog
 from partition import partition
-from torch.utils.data import DataLoader
 from vocab import buildVocab
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -129,6 +127,4 @@ if __name__ == '__main__':
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
         
     model.setOptimizer(optimizer)
-    model.fit_evaluate(session_train, 
-                       session_test, 
-                       args)
+    model.fit_evaluate(session_train, session_test, args)
