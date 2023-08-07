@@ -1,8 +1,8 @@
-# UniLog
+# LogOnline
 
 ## Dataset Preparation and Dependencies
 
-To run UniLog, the dependencies should first be installed via
+To run LogOnline, the dependencies should first be installed via
 
 ```
 pip install -r requirements.txt
@@ -21,9 +21,9 @@ The normality detection model is trained separately using the notebook script in
 Afterwards, the parameter files of the trained normality detection model are placed under `checkpoint/` directory, which are loaded by the anomaly detection model in the evaluation phase.
 For ease of use, we already placed the checkpoints for both HDFS and BGL dataset under the `checkpoint/` directory.
 
-## Running of UniLog
+## Running of LogOnline
 
-You can run our proposed UniLog by the following command
+You can run our proposed LogOnline by the following command
 
 ```
 bash scripts/run_unilog.sh
