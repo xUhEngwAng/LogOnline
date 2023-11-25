@@ -39,7 +39,7 @@ python src/train.py --help
 ## Citation
 If you find this code helpful for your work or research, please cite:
 
-'''
+```
 @INPROCEEDINGS{LogOnline,
   author={Wang, Xuheng and Song, Jiaxing and Zhang, Xu and Tang, Junshu and Gao, Weihe and Lin, Qingwei},
   booktitle={2023 38th IEEE/ACM International Conference on Automated Software Engineering (ASE)}, 
@@ -48,4 +48,4 @@ If you find this code helpful for your work or research, please cite:
   pages={141-152},
   doi={10.1109/ASE56229.2023.00043}
 }
-'''
+```
